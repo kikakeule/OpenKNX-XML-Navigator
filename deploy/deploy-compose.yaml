@@ -1,6 +1,6 @@
 services:
   openknx-xml-navigator:
-    image: openknx-xml-navigator:truenas
+    image: openknx-xml-navigator:deploy
     build:
       context: https://github.com/kikakeule/OpenKNX-XML-Navigator.git#main:.
     container_name: openknx-xml-navigator
