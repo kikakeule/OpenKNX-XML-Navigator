@@ -1,0 +1,15 @@
+services:
+  openknx-xml-navigator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: openknx-xml-navigator
+    restart: unless-stopped
+    ports:
+      - "4173:4173"
+    environment:
+      OPENKNX_XML_NAVIGATOR_PORT: "4173"
+      OPENKNX_XML_NAVIGATOR_SOURCE_DIRS: "examples;data"
+      OPENKNX_XML_NAVIGATOR_DEFAULT_SOURCE: "examples/LedDimmerAB.debug.xml"
+    volumes:
+      - ./data:/app/data

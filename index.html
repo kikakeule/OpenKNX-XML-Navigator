@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>OpenKNX XML Navigator</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="masthead">
+        <div>
+          <h1>OpenKNX XML Navigator</h1>
+          <p class="subtitle">Interaktive Vorschau fuer expandierte OpenKNX-XML mit Navigation, Bedingungen und Parameteransicht.</p>
+        </div>
+        <form id="source-form" class="source-panel">
+          <label class="field-label" for="source-select">Bekannte XML-Quelle</label>
+          <select id="source-select"></select>
+          <label class="field-label" for="source-file">Lokale XML-Datei</label>
+          <input id="source-file" type="file" accept=".xml,application/xml,text/xml" />
+          <p class="panel-hint">Nutze die Liste fuer Server-Quellen oder waehle eine lokale XML-Datei direkt im Browser.</p>
+          <div class="button-row">
+            <button type="submit">Laden</button>
+            <button id="load-default-button" type="button" class="ghost">Load default</button>
+            <button id="reload-button" type="button" class="ghost">Neu auslesen</button>
+          </div>
+        </form>
+      </header>
+
+      <section id="warning-banner" class="warning-banner hidden"></section>
+
+      <main class="workspace">
+        <aside class="sidebar card">
+          <div class="sidebar-header">
+            <h2>Navigation</h2>
+            <p id="stats-text"></p>
+          </div>
+          <nav id="navigation-tree" class="navigation-tree"></nav>
+        </aside>
+
+        <section class="content card">
+          <div class="content-header">
+            <div>
+              <p id="breadcrumbs" class="breadcrumbs"></p>
+              <h2 id="page-title">Noch keine XML geladen</h2>
+            </div>
+            <div id="page-meta" class="page-meta"></div>
+          </div>
+
+          <div class="tab-bar" role="tablist" aria-label="Navigator Ansichten">
+            <button type="button" class="tab-button" data-view="channels" role="tab" aria-selected="false">
+              <span>Kanaele</span>
+              <span id="tab-channels-count" class="tab-count">0</span>
+            </button>
+            <button type="button" class="tab-button" data-view="objects" role="tab" aria-selected="false">
+              <span>Kommunikationsobjekte</span>
+              <span id="tab-objects-count" class="tab-count">0</span>
+            </button>
+            <button type="button" class="tab-button is-active" data-view="parameter" role="tab" aria-selected="true">
+              <span>Parameter</span>
+              <span id="tab-parameters-count" class="tab-count">0</span>
+            </button>
+          </div>
+
+          <div id="app-status" class="status-panel">
+            Die Quelle wird vorbereitet.
+          </div>
+
+          <div id="page-content" class="page-content"></div>
+        </section>
+      </main>
+
+      <section class="help-frame card">
+        <div class="help-header">
+          <div>
+            <p id="help-context" class="breadcrumbs"></p>
+            <h2 id="help-title">Kontexthilfe</h2>
+          </div>
+        </div>
+        <div id="help-content" class="help-content">
+          Die Hilfetexte werden geladen.
+        </div>
+      </section>
+    </div>
+
+    <template id="nav-item-template">
+      <div class="nav-item">
+        <button type="button" class="nav-link"></button>
+      </div>
+    </template>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

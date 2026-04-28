@@ -1,0 +1,17 @@
+{
+  "name": "openknx-xml-navigator",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Browser-based OpenKNX XML Navigator for KNX debug XML",
+  "dependencies": {
+    "adm-zip": "^0.5.17"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node server.js",
+    "start": "node server.js"
+  }
+}
