@@ -55,9 +55,9 @@ docker compose up --build -d
 
 The included `docker-compose.yml` builds the image locally, publishes port `4173`, and mounts `./data` into the container.
 
-## TrueNAS
+## Deployment
 
-Use `deploy/truenas-compose.yaml` as the starting point for a custom app.
+Use `deploy/deploy-compose.yaml` as the starting point for a custom app.
 
 The included example is YAML-only:
 
@@ -68,12 +68,12 @@ The included example is YAML-only:
 
 This is enough if you mainly want the bundled example plus the browser file picker for ad-hoc XML files.
 
-If you want additional server-backed XML files on TrueNAS, add a host path mount to `/app/data`, for example:
+If you want additional server-backed XML files, add a host path mount to `/app/data`, for example:
 
 ```yaml
 		volumes:
 			- /mnt/tank/apps/OpenKNX-XML-Navigator/data:/app/data
 ```
 
-If your TrueNAS release rejects remote Git build contexts, the fallback is the local-path approach from `docker-compose.yml`: clone the repository onto the NAS and use that path as the build context.
+If your Docker release rejects remote Git build contexts, the fallback is the local-path approach from `docker-compose.yml`: clone the repository onto the NAS and use that path as the build context.
 
