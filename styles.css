@@ -114,6 +114,46 @@ h1 {
   box-shadow: var(--shadow);
 }
 
+.source-panel.is-collapsed {
+  gap: 0;
+}
+
+.source-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.source-panel-title {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.source-summary {
+  margin: 0;
+  font-size: 1rem;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.source-panel-body {
+  display: grid;
+  gap: 10px;
+}
+
+.source-panel.is-collapsed .source-panel-body {
+  display: none;
+}
+
+.panel-toggle {
+  white-space: nowrap;
+}
+
 .field-label {
   color: var(--muted);
   font-size: 0.86rem;

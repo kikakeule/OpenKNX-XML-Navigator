@@ -13,16 +13,25 @@
           <h1>OpenKNX XML Navigator</h1>
           <p class="subtitle">Interaktive Vorschau fuer expandierte OpenKNX-XML mit Navigation, Bedingungen und Parameteransicht.</p>
         </div>
-        <form id="source-form" class="source-panel">
-          <label class="field-label" for="source-select">Bekannte XML-Quelle</label>
-          <select id="source-select"></select>
-          <label class="field-label" for="source-file">Lokale XML-Datei</label>
-          <input id="source-file" type="file" accept=".xml,application/xml,text/xml" />
-          <p class="panel-hint">Nutze die Liste fuer Server-Quellen oder waehle eine lokale XML-Datei direkt im Browser.</p>
-          <div class="button-row">
-            <button type="submit">Laden</button>
-            <button id="load-default-button" type="button" class="ghost">Load default</button>
-            <button id="reload-button" type="button" class="ghost">Neu auslesen</button>
+        <form id="source-form" class="source-panel is-collapsed">
+          <div class="source-panel-header">
+            <div class="source-panel-title">
+              <p class="field-label">XML-Quelle</p>
+              <p id="source-summary" class="source-summary">Noch keine XML ausgewaehlt</p>
+            </div>
+            <button id="toggle-source-panel" type="button" class="ghost panel-toggle" aria-expanded="false" aria-controls="source-panel-body">Ausklappen</button>
+          </div>
+          <div id="source-panel-body" class="source-panel-body">
+            <label class="field-label" for="source-select">Bekannte XML-Quelle</label>
+            <select id="source-select"></select>
+            <label class="field-label" for="source-file">Lokale XML-Datei</label>
+            <input id="source-file" type="file" accept=".xml,application/xml,text/xml" />
+            <p class="panel-hint">Nutze die Liste fuer Server-Quellen oder waehle eine lokale XML-Datei direkt im Browser.</p>
+            <div class="button-row">
+              <button type="submit">Laden</button>
+              <button id="load-default-button" type="button" class="ghost">Load default</button>
+              <button id="reload-button" type="button" class="ghost">Neu auslesen</button>
+            </div>
           </div>
         </form>
       </header>
@@ -62,9 +71,7 @@
             </button>
           </div>
 
-          <div id="app-status" class="status-panel">
-            Die Quelle wird vorbereitet.
-          </div>
+          <div id="app-status" class="status-panel hidden" aria-live="polite"></div>
 
           <div id="page-content" class="page-content"></div>
         </section>

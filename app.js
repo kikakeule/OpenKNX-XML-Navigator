@@ -27,6 +27,7 @@ const state = {
   explicitHelpContext: "",
   explicitHelpLabel: "",
   helpTexts: {},
+  isSourcePanelCollapsed: true,
   localSourceName: "",
   model: null,
   selectedNodeId: null,
@@ -54,11 +55,13 @@ const elements = {
   sourceFile: document.querySelector("#source-file"),
   sourceForm: document.querySelector("#source-form"),
   sourceSelect: document.querySelector("#source-select"),
+  sourceSummary: document.querySelector("#source-summary"),
   statsText: document.querySelector("#stats-text"),
   tabButtons: Array.from(document.querySelectorAll(".tab-button")),
   tabChannelsCount: document.querySelector("#tab-channels-count"),
   tabObjectsCount: document.querySelector("#tab-objects-count"),
   tabParametersCount: document.querySelector("#tab-parameters-count"),
+  toggleSourcePanel: document.querySelector("#toggle-source-panel"),
   warningBanner: document.querySelector("#warning-banner"),
 };
 
@@ -68,6 +71,8 @@ bootstrap().catch((error) => {
 
 async function bootstrap() {
   bindEvents();
+  setSourcePanelCollapsed(state.isSourcePanelCollapsed);
+  updateSourceSummary();
   await refreshSources();
   if (state.defaultSource) {
     await loadDefaultSource();
@@ -86,6 +91,10 @@ function bindEvents() {
 
   elements.reloadButton.addEventListener("click", async () => {
     await refreshSources();
+  });
+
+  elements.toggleSourcePanel.addEventListener("click", () => {
+    setSourcePanelCollapsed(!state.isSourcePanelCollapsed);
   });
 
   elements.defaultButton.addEventListener("click", async () => {
@@ -132,7 +141,13 @@ async function refreshSources() {
   elements.sourceSelect.value = nextSelection;
   elements.sourceSelect.disabled = state.sources.length === 0;
   elements.defaultButton.disabled = !state.defaultSource;
-  setStatus(state.sources.length > 0 ? "Quellen aktualisiert." : "Keine XML-Dateien verfuegbar.");
+  updateSourceSummary();
+
+  if (state.sources.length > 0 || state.model) {
+    clearStatus();
+  } else {
+    setStatus("Keine XML-Dateien verfuegbar. Lade eine lokale XML-Datei oder konfiguriere eine Default-Quelle.", true);
+  }
 }
 
 async function loadSelectedSource() {
@@ -182,7 +197,6 @@ async function loadServerSource(source) {
     helpTexts: helpPayload.helps || {},
     selectedSource: source,
     sourceOrigin: "server",
-    statusText: `${source} geladen.`,
   });
 }
 
@@ -200,7 +214,6 @@ async function handleLocalSourceSelection(event) {
       localSourceName: file.name,
       selectedSource: "",
       sourceOrigin: "local",
-      statusText: `${file.name} geladen. Hilfe und Icons sind fuer lokale Dateien nur verfuegbar, wenn die XML als Server-Quelle bereitliegt.`,
     });
   } finally {
     event.target.value = "";
@@ -220,8 +233,41 @@ function applyLoadedXml(xmlText, options) {
   state.explicitHelpLabel = "";
   updateDerivedState();
   state.selectedNodeId = pickInitialNodeId();
+  updateSourceSummary();
   render();
-  setStatus(nextOptions.statusText || "XML geladen.");
+  clearStatus();
+}
+
+function setSourcePanelCollapsed(isCollapsed) {
+  state.isSourcePanelCollapsed = isCollapsed;
+  elements.sourceForm.classList.toggle("is-collapsed", isCollapsed);
+  elements.toggleSourcePanel.textContent = isCollapsed ? "Ausklappen" : "Minimieren";
+  elements.toggleSourcePanel.setAttribute("aria-expanded", String(!isCollapsed));
+}
+
+function updateSourceSummary() {
+  const fullLabel = resolveSourceSummaryLabel();
+  const shortLabel = fullLabel ? extractFileName(fullLabel) : "Noch keine XML ausgewaehlt";
+  elements.sourceSummary.textContent = shortLabel;
+
+  if (fullLabel) {
+    elements.sourceSummary.title = fullLabel;
+  } else {
+    elements.sourceSummary.removeAttribute("title");
+  }
+}
+
+function resolveSourceSummaryLabel() {
+  if (state.sourceOrigin === "local" && state.localSourceName) {
+    return state.localSourceName;
+  }
+
+  return state.selectedSource || elements.sourceSelect.value || state.defaultSource || "";
+}
+
+function extractFileName(path) {
+  const segments = String(path || "").split(/[\\/]/).filter(Boolean);
+  return segments[segments.length - 1] || "";
 }
 
 function updateDerivedState() {
@@ -1388,8 +1434,15 @@ function createEmptyState(text) {
   return emptyState;
 }
 
+function clearStatus() {
+  elements.appStatus.textContent = "";
+  elements.appStatus.classList.add("hidden");
+  elements.appStatus.style.color = "";
+}
+
 function setStatus(text, isError = false) {
   elements.appStatus.textContent = text;
+  elements.appStatus.classList.remove("hidden");
   elements.appStatus.style.color = isError ? "var(--accent)" : "var(--muted)";
 }
 
