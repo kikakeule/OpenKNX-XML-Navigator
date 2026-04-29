@@ -111,12 +111,6 @@ docker compose up --build -d
 
 The included `docker-compose.yml` builds the image locally, publishes port `4173`, and mounts `./data` into the container.
 
-## Public hosting note
-
-If you expose the navigator outside a private local setup, trademark attribution alone is usually not enough. Depending on jurisdiction and audience, you may also need operator-specific legal information such as an Impressum, provider identification, privacy notice, or contact details.
-
-This project does not generate a built-in legal notice page or Impressum for you. If your deployment requires one, provide it separately as part of the hosting environment or a linked external page.
-
 ## Deployment
 
 Use `deploy/deploy-compose.yaml` as the starting point for a generic custom-app deployment.
