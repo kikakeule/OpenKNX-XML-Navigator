@@ -481,7 +481,7 @@ function renderContent() {
   if (!state.model || !state.selectedNodeId || !state.visibleNodeIds.has(state.selectedNodeId)) {
     elements.breadcrumbs.textContent = "";
     elements.pageTitle.textContent = "Noch keine XML geladen";
-    elements.pageContent.append(createEmptyState("Waehle eine XML-Datei, um die OpenKNX XML-Struktur anzuzeigen."));
+    elements.pageContent.append(createEmptyState("Waehle eine XML-Datei, um die XML-Struktur anzuzeigen."));
     return;
   }
 
