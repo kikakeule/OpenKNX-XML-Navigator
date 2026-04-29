@@ -197,13 +197,25 @@ export function describeObject(node, runtimeState) {
   const comObjectRef = node.comObjectRef;
   const comObject = node.comObject;
   return {
+    communicationFlag: resolveObjectFlag(comObjectRef?.communicationFlag, comObject?.communicationFlag),
     datapointType: comObject?.datapointType || "",
     functionText: comObject?.functionText || comObjectRef?.functionText || "",
     helpContext: node.helpContext || "",
     name: comObject?.name || comObjectRef?.name || "Kommunikationsobjekt",
+    number: comObject?.number || "",
     objectSize: comObject?.objectSize || "",
+    priority: comObject?.priority || "Low",
+    readFlag: resolveObjectFlag(comObjectRef?.readFlag, comObject?.readFlag),
+    readOnInitFlag: resolveObjectFlag(comObjectRef?.readOnInitFlag, comObject?.readOnInitFlag),
     text: resolveTemplateText(comObjectRef?.text || comObject?.text || node.text || "", comObjectRef?.textParameterRefId, runtimeState),
+    transmitFlag: resolveObjectFlag(comObjectRef?.transmitFlag, comObject?.transmitFlag),
+    updateFlag: resolveObjectFlag(comObjectRef?.updateFlag, comObject?.updateFlag),
+    writeFlag: resolveObjectFlag(comObjectRef?.writeFlag, comObject?.writeFlag),
   };
+}
+
+function resolveObjectFlag(primaryValue, fallbackValue) {
+  return primaryValue || fallbackValue || "Disabled";
 }
 
 function parseParameterTypes(staticNode, context) {
@@ -298,13 +310,20 @@ function parseComObjects(staticNode, context) {
     }
 
     context.comObjects.set(attr(comObjectNode, "Id"), {
+      communicationFlag: attr(comObjectNode, "CommunicationFlag"),
       datapointType: attr(comObjectNode, "DatapointType"),
       functionText: attr(comObjectNode, "FunctionText"),
       id: attr(comObjectNode, "Id"),
       name: attr(comObjectNode, "Name"),
       number: attr(comObjectNode, "Number"),
       objectSize: attr(comObjectNode, "ObjectSize"),
+      priority: attr(comObjectNode, "Priority"),
+      readFlag: attr(comObjectNode, "ReadFlag"),
+      readOnInitFlag: attr(comObjectNode, "ReadOnInitFlag"),
       text: attr(comObjectNode, "Text"),
+      transmitFlag: attr(comObjectNode, "TransmitFlag"),
+      updateFlag: attr(comObjectNode, "UpdateFlag"),
+      writeFlag: attr(comObjectNode, "WriteFlag"),
     });
   });
 }
@@ -321,11 +340,17 @@ function parseComObjectRefs(staticNode, context) {
     }
 
     context.comObjectRefs.set(attr(comObjectRefNode, "Id"), {
+      communicationFlag: attr(comObjectRefNode, "CommunicationFlag"),
       functionText: attr(comObjectRefNode, "FunctionText"),
       id: attr(comObjectRefNode, "Id"),
+      readFlag: attr(comObjectRefNode, "ReadFlag"),
+      readOnInitFlag: attr(comObjectRefNode, "ReadOnInitFlag"),
       refId: attr(comObjectRefNode, "RefId"),
       text: attr(comObjectRefNode, "Text"),
       textParameterRefId: attr(comObjectRefNode, "TextParameterRefId"),
+      transmitFlag: attr(comObjectRefNode, "TransmitFlag"),
+      updateFlag: attr(comObjectRefNode, "UpdateFlag"),
+      writeFlag: attr(comObjectRefNode, "WriteFlag"),
     });
   });
 }

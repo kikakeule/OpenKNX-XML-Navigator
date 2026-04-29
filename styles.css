@@ -961,18 +961,23 @@ button.ghost {
 
 .object-table {
   width: 100%;
-  min-width: 640px;
+  min-width: 860px;
   border-collapse: collapse;
   border: 1px solid #d4d4d4;
+  table-layout: fixed;
 }
 
 .object-table th,
 .object-table td {
-  padding: 6px 8px;
+  padding: 4px 6px;
   text-align: left;
   border-bottom: 1px solid #e2e2e2;
+  border-right: 1px solid #e2e2e2;
   vertical-align: top;
-  font-size: 0.75rem;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .object-table th {
@@ -980,6 +985,123 @@ button.ghost {
   color: #3c3c3c;
   font-weight: 600;
 }
+
+.object-table th:last-child,
+.object-table td:last-child {
+  border-right: 0;
+}
+
+.object-table tbody tr:hover {
+  background: #f7f9fd;
+}
+
+.object-table-col-icon {
+  width: 1.7rem;
+  padding: 0 4px;
+  text-align: center;
+}
+
+.object-table-icon {
+  position: relative;
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 1px solid #8e9aa7;
+  border-radius: 2px;
+  background: linear-gradient(180deg, #ffffff 0%, #ebeff4 100%);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+}
+
+.object-table-icon::before,
+.object-table-icon::after {
+  content: "";
+  position: absolute;
+}
+
+.object-icon-input .object-table-icon::before {
+  top: 5px;
+  left: -1px;
+  width: 5px;
+  height: 2px;
+  background: #4b89d6;
+}
+
+.object-icon-input .object-table-icon::after {
+  top: 3px;
+  left: 3px;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-left: 5px solid #4b89d6;
+}
+
+.object-icon-output .object-table-icon::before {
+  top: 5px;
+  right: -1px;
+  width: 5px;
+  height: 2px;
+  background: #d49a36;
+}
+
+.object-icon-output .object-table-icon::after {
+  top: 3px;
+  right: 3px;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-right: 5px solid #d49a36;
+}
+
+.object-icon-bidirectional .object-table-icon::before {
+  top: 2px;
+  left: 2px;
+  width: 4px;
+  height: 4px;
+  border-left: 2px solid #4b89d6;
+  border-bottom: 2px solid #4b89d6;
+  transform: rotate(45deg);
+}
+
+.object-icon-bidirectional .object-table-icon::after {
+  right: 2px;
+  bottom: 2px;
+  width: 4px;
+  height: 4px;
+  border-right: 2px solid #d49a36;
+  border-top: 2px solid #d49a36;
+  transform: rotate(45deg);
+}
+
+.object-icon-passive .object-table-icon {
+  background: linear-gradient(180deg, #ffffff 0%, #f0f0f0 100%);
+}
+
+.object-table-col-number {
+  width: 4.5rem;
+  white-space: nowrap;
+}
+
+.object-table-col-name {
+  width: 10.5rem;
+}
+
+.object-table-col-function {
+  width: 8.5rem;
+}
+
+.object-table-col-size {
+  width: 5rem;
+  white-space: nowrap;
+}
+
+.object-table-col-flag {
+  width: 1.8rem;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.object-table-col-type {
+  width: 6rem;
+}
+
 
 .channel-grid {
   display: grid;

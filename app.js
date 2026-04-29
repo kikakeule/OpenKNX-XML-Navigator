@@ -21,6 +21,7 @@ const HIDDEN_PARAMETER_NAMES = new Set([
 ]);
 const HIDDEN_PARAMETER_PATTERNS = [/^LED_HardwareVariant(?:Has|Can)/];
 const DEFAULT_LAYOUT_MODE = "fixed";
+const DEFAULT_OBJECT_SCOPE = "all";
 const DEFAULT_PRESENTATION_MODE = "view";
 const LAYOUT_MODE_STORAGE_KEY = "openknxXmlNavigator.layoutMode";
 const PRESENTATION_MODE_STORAGE_KEY = "openknxXmlNavigator.presentationMode";
@@ -35,6 +36,7 @@ const state = {
   layoutMode: DEFAULT_LAYOUT_MODE,
   localSourceName: "",
   model: null,
+  objectScope: DEFAULT_OBJECT_SCOPE,
   presentationMode: DEFAULT_PRESENTATION_MODE,
   selectedNodeId: null,
   selectedSource: "",
@@ -55,6 +57,7 @@ const elements = {
   helpTitle: document.querySelector("#help-title"),
   layoutModeButtons: Array.from(document.querySelectorAll("[data-layout-mode-toggle]")),
   navigationTree: document.querySelector("#navigation-tree"),
+  objectScopeButtons: Array.from(document.querySelectorAll("[data-object-scope-toggle]")),
   pageContent: document.querySelector("#page-content"),
   pageMeta: document.querySelector("#page-meta"),
   pageTitle: document.querySelector("#page-title"),
@@ -138,6 +141,14 @@ function bindEvents() {
       state.layoutMode = button.dataset.layoutModeToggle || DEFAULT_LAYOUT_MODE;
       persistDisplayPreference(LAYOUT_MODE_STORAGE_KEY, state.layoutMode);
       applyDisplayPreferences();
+    });
+  }
+
+  for (const button of elements.objectScopeButtons) {
+    button.addEventListener("click", () => {
+      state.objectScope = button.dataset.objectScopeToggle || DEFAULT_OBJECT_SCOPE;
+      syncToggleButtons(elements.objectScopeButtons, "objectScopeToggle", state.objectScope);
+      render();
     });
   }
 
@@ -311,6 +322,7 @@ function applyDisplayPreferences() {
 
   syncToggleButtons(elements.uiModeButtons, "uiModeToggle", state.presentationMode);
   syncToggleButtons(elements.layoutModeButtons, "layoutModeToggle", state.layoutMode);
+  syncToggleButtons(elements.objectScopeButtons, "objectScopeToggle", state.objectScope);
 }
 
 function syncToggleButtons(buttons, dataKey, activeValue) {
@@ -388,7 +400,7 @@ function renderWarnings() {
 
 function renderTabs() {
   const parameterCount = countVisibleParametersForSelection();
-  const objectCount = collectVisibleObjectsForSelection().length;
+  const objectCount = countVisibleObjectsForCurrentScope();
   const channelCount = countNodes(state.visibleRoots, (node) => node.kind === "channel");
 
   elements.tabChannelsCount.textContent = String(channelCount);
@@ -623,8 +635,11 @@ function renderParameterOverview(selectedNode) {
 
 function renderObjectOverview(selectedNode) {
   const contextNode = getObjectContextNode(selectedNode);
-  const objects = collectVisibleObjectsForNode(contextNode);
-  if (objects.length === 0) {
+  const entries = state.objectScope === "all"
+    ? collectVisibleObjectEntriesForNodes(state.visibleRoots)
+    : collectVisibleObjectEntriesForNode(contextNode);
+
+  if (entries.length === 0) {
     elements.pageContent.append(createEmptyState("Fuer diese Auswahl sind derzeit keine sichtbaren Kommunikationsobjekte vorhanden."));
     return;
   }
@@ -634,7 +649,9 @@ function renderObjectOverview(selectedNode) {
 
   const heading = document.createElement("h3");
   heading.className = "section-title";
-  heading.textContent = resolveTitle(contextNode, state.derivedState);
+  heading.textContent = state.objectScope === "all"
+    ? "Aktive Kommunikationsobjekte"
+    : resolveTitle(contextNode, state.derivedState);
   wrapper.append(heading);
 
   const table = document.createElement("table");
@@ -642,36 +659,132 @@ function renderObjectOverview(selectedNode) {
 
   const thead = document.createElement("thead");
   const headerRow = document.createElement("tr");
-  for (const label of ["KO", "Funktion", "DPT", "Groesse"]) {
+  for (const column of getObjectTableColumns()) {
     const th = document.createElement("th");
-    th.textContent = label;
+    th.textContent = column.label;
+    if (column.className) {
+      th.className = column.className;
+    }
     headerRow.append(th);
   }
   thead.append(headerRow);
   table.append(thead);
 
   const tbody = document.createElement("tbody");
-  for (const objectNode of objects) {
+  for (const entry of entries) {
+    const objectNode = entry.node;
     const description = describeObject(objectNode, state.derivedState);
+    const rowValues = buildObjectTableRow(description);
     const row = document.createElement("tr");
-    for (const value of [
-      description.text || description.name,
-      description.functionText || "-",
-      description.datapointType || "-",
-      description.objectSize || "-",
-    ]) {
+    for (const value of rowValues) {
       const td = document.createElement("td");
-      td.textContent = value;
+      if (value.icon) {
+        const icon = document.createElement("span");
+        icon.className = "object-table-icon";
+        icon.setAttribute("aria-hidden", "true");
+        td.append(icon);
+      } else {
+        td.textContent = value.text;
+      }
+      if (value.className) {
+        td.className = value.className;
+      }
+      if (value.title) {
+        td.title = value.title;
+      }
       row.append(td);
     }
     row.addEventListener("click", () => {
-      setExplicitHelp(objectNode.helpContext || contextNode.helpContext || "", description.text || description.name);
+      setExplicitHelp(objectNode.helpContext || entry.contextNode?.helpContext || contextNode.helpContext || "", description.text || description.name);
     });
     tbody.append(row);
   }
   table.append(tbody);
   wrapper.append(table);
   elements.pageContent.append(wrapper);
+}
+
+function getObjectTableColumns() {
+  return [
+    { label: "", className: "object-table-col-icon" },
+    { label: "Nummer", className: "object-table-col-number" },
+    { label: "Name", className: "object-table-col-name" },
+    { label: "Objektfunktion", className: "object-table-col-function" },
+    { label: "Länge", className: "object-table-col-size" },
+    { label: "K", className: "object-table-col-flag" },
+    { label: "L", className: "object-table-col-flag" },
+    { label: "S", className: "object-table-col-flag" },
+    { label: "Ü", className: "object-table-col-flag" },
+    { label: "A", className: "object-table-col-flag" },
+    { label: "Datentyp", className: "object-table-col-type" },
+  ];
+}
+
+function buildObjectTableRow(description) {
+  const iconDescriptor = describeObjectIcon(description);
+  return [
+    { text: "", className: `object-table-col-icon ${iconDescriptor.className}`, title: iconDescriptor.title, icon: true },
+    { text: description.number || "-", className: "object-table-col-number" },
+    { text: description.text || description.name || "-", className: "object-table-col-name", title: description.name || "" },
+    { text: description.functionText || "-", className: "object-table-col-function" },
+    { text: formatObjectSize(description.objectSize), className: "object-table-col-size" },
+    { text: formatObjectFlag(description.communicationFlag, "K"), className: "object-table-col-flag" },
+    { text: formatObjectFlag(description.readFlag, "L"), className: "object-table-col-flag" },
+    { text: formatObjectFlag(description.writeFlag, "S"), className: "object-table-col-flag" },
+    { text: formatObjectFlag(description.transmitFlag, "Ü"), className: "object-table-col-flag" },
+    { text: formatObjectFlag(description.updateFlag, "A"), className: "object-table-col-flag" },
+    { text: description.datapointType || "-", className: "object-table-col-type" },
+  ];
+}
+
+function describeObjectIcon(description) {
+  const isReadable = String(description.readFlag || "").toLowerCase() === "enabled";
+  const isWritable = String(description.writeFlag || "").toLowerCase() === "enabled";
+  const isTransmitted = String(description.transmitFlag || "").toLowerCase() === "enabled";
+
+  if (isWritable && isTransmitted) {
+    return { className: "object-icon-bidirectional", title: "Senden und empfangen" };
+  }
+
+  if (isWritable) {
+    return { className: "object-icon-input", title: "Empfangsobjekt" };
+  }
+
+  if (isTransmitted || isReadable) {
+    return { className: "object-icon-output", title: "Sendeobjekt" };
+  }
+
+  return { className: "object-icon-passive", title: "Kommunikationsobjekt" };
+}
+
+function formatObjectSize(value) {
+  const normalized = String(value || "").trim();
+  if (!normalized) {
+    return "-";
+  }
+
+  return normalized
+    .replace(/Bytes?/g, (match) => match.toLowerCase())
+    .replace(/Bits?/g, (match) => match.toLowerCase());
+}
+
+function formatObjectFlag(value, letter) {
+  return String(value || "").toLowerCase() === "enabled" ? letter : "-";
+}
+
+function formatObjectPriority(value) {
+  switch (String(value || "Low").toLowerCase()) {
+    case "alarm":
+      return "Alarm";
+    case "high":
+      return "Hoch";
+    case "low":
+      return "Niedrig";
+    case "system":
+      return "System";
+    default:
+      return String(value || "Niedrig");
+  }
 }
 
 function renderChannelOverview(selectedNode) {
@@ -1424,16 +1537,99 @@ function collectVisibleObjectsForSelection() {
   if (!selectedNode) {
     return [];
   }
-  return collectVisibleObjectsForNode(getObjectContextNode(selectedNode));
+  return collectVisibleObjectEntriesForNode(getObjectContextNode(selectedNode)).map((entry) => entry.node);
+}
+
+function countVisibleObjectsForCurrentScope() {
+  if (state.objectScope === "all") {
+    return collectVisibleObjectEntriesForNodes(state.visibleRoots).length;
+  }
+
+  return collectVisibleObjectsForSelection().length;
 }
 
 function collectVisibleObjectsForNode(rawNode) {
+  return collectVisibleObjectEntriesForNode(rawNode).map((entry) => entry.node);
+}
+
+function collectVisibleObjectEntriesForNode(rawNode) {
   if (!rawNode) {
     return [];
   }
 
   const visibleNode = materializeNode(rawNode, state.derivedState);
+  return collectVisibleObjectEntriesForVisibleNodes([visibleNode]);
+}
+
+function collectVisibleObjectEntriesForNodes(nodes) {
+  return collectVisibleObjectEntriesForVisibleNodes(nodes || []);
+}
+
+function collectVisibleObjectEntriesForVisibleNodes(nodes) {
   const objects = new Map();
+
+  function walk(node, channelNode = null, blockTrail = []) {
+    if (!node) {
+      return;
+    }
+
+    const nextChannelNode = node.kind === "channel" ? node : channelNode;
+    const nextBlockTrail =
+      node.kind === "parameterBlock" && !node.inline && resolveTitle(node, state.derivedState)
+        ? [...blockTrail, node]
+        : blockTrail;
+
+    if (node.kind === "comObjectRef") {
+      const key = node.comObjectRef?.id || `${node.refId}:${node.comObject?.name || node.comObjectRef?.text || "ko"}`;
+      if (!objects.has(key)) {
+        const connectedNode = nextBlockTrail[nextBlockTrail.length - 1] || nextChannelNode;
+        objects.set(key, {
+          channelNode: nextChannelNode,
+          connectedWith: buildObjectConnectionLabel(nextChannelNode, nextBlockTrail),
+          contextNode: connectedNode,
+          node,
+        });
+      }
+      return;
+    }
+
+    for (const childNode of node.visibleChildren || []) {
+      walk(childNode, nextChannelNode, nextBlockTrail);
+    }
+  }
+
+  for (const node of nodes) {
+    walk(node, null, []);
+  }
+
+  return Array.from(objects.values()).sort((left, right) => {
+    const leftNumber = Number.parseInt(describeObject(left.node, state.derivedState).number || "", 10);
+    const rightNumber = Number.parseInt(describeObject(right.node, state.derivedState).number || "", 10);
+
+    if (!Number.isNaN(leftNumber) && !Number.isNaN(rightNumber) && leftNumber !== rightNumber) {
+      return leftNumber - rightNumber;
+    }
+
+    return (describeObject(left.node, state.derivedState).text || "").localeCompare(describeObject(right.node, state.derivedState).text || "", "de");
+  });
+}
+
+function buildObjectConnectionLabel(channelNode, blockTrail) {
+  const parts = [];
+
+  if (channelNode) {
+    parts.push(resolveTitle(channelNode, state.derivedState));
+  }
+
+  for (const blockNode of blockTrail) {
+    const title = resolveTitle(blockNode, state.derivedState);
+    if (!title || title === parts[parts.length - 1]) {
+      continue;
+    }
+    parts.push(title);
+  }
+
+  return parts.join(": ");
 
   function walk(node) {
     if (!node) {
