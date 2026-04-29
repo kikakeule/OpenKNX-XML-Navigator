@@ -1,6 +1,8 @@
 const ELEMENT_NODE = 1;
+const TRANSLATABLE_ATTRIBUTES = new Set(["FunctionText", "Name", "SuffixText", "Text"]);
+const translationMapsByDocument = new WeakMap();
 
-export function buildSimulatorModel(xmlText) {
+export function buildSimulatorModel(xmlText, options = {}) {
   const parser = new DOMParser();
   const xml = parser.parseFromString(xmlText, "application/xml");
   const parserError = xml.getElementsByTagName("parsererror")[0];
@@ -18,6 +20,10 @@ export function buildSimulatorModel(xmlText) {
   if (!appNode) {
     throw new Error("ApplicationProgram wurde in der XML nicht gefunden.");
   }
+
+  const defaultLanguage = appNode.getAttribute("DefaultLanguage") || "de";
+  const selectedLanguage = String(options.language || defaultLanguage).trim();
+  translationMapsByDocument.set(xml, buildTranslationMap(appNode, selectedLanguage));
 
   const staticNode = childByName(appNode, "Static");
   const dynamicNode = childByName(appNode, "Dynamic");
@@ -78,9 +84,10 @@ export function buildSimulatorModel(xmlText) {
       applicationId: attr(appNode, "Id"),
       applicationNumber: attr(appNode, "ApplicationNumber"),
       applicationVersion: attr(appNode, "ApplicationVersion"),
-      defaultLanguage: attr(appNode, "DefaultLanguage", "de"),
+      defaultLanguage,
       name: attr(appNode, "Name", "ApplicationProgram"),
       programType: attr(appNode, "ProgramType"),
+      selectedLanguage,
     },
     navigation,
     nodeIndex: context.nodeIndex,
@@ -148,7 +155,13 @@ export function resolveTitle(node, runtimeState) {
     return "";
   }
 
-  return resolveTemplateText(node.text || node.name || node.number || node.id, node.textParameterRefId, runtimeState);
+  let title = "";
+
+  if (node.kind === "parameterBlock" && !node.rawText) {
+    title = node.parameter?.text || node.parameter?.name || "";
+  }
+
+  return resolveTemplateText(title || node.text || node.name || node.number || node.id, node.textParameterRefId, runtimeState);
 }
 
 export function resolveNodePath(model, nodeId) {
@@ -402,6 +415,10 @@ function parseDynamicNode(node, context) {
     }
     case "ParameterBlock": {
       context.stats.parameterBlocks += 1;
+      const parameterRefId = attr(node, "ParamRefId");
+      const parameterRef = context.parameterRefs.get(parameterRefId);
+      const parameter = parameterRef ? context.parameters.get(parameterRef.refId) : null;
+
       return registerNode(
         {
           children: parseDynamicChildren(node, context),
@@ -413,6 +430,9 @@ function parseDynamicNode(node, context) {
           kind: "parameterBlock",
           layout: attr(node, "Layout"),
           name: attr(node, "Name"),
+          parameter,
+          parameterRef,
+          paramRefId: parameterRefId,
           rawText: attr(node, "Text"),
           rows: parseGridAxis(childByName(node, "Rows"), "Row"),
           showInComObjectTree: attr(node, "ShowInComObjectTree"),
@@ -704,9 +724,85 @@ function localName(node) {
   return node.localName || node.nodeName;
 }
 
+function buildTranslationMap(appNode, languageIdentifier) {
+  const normalizedLanguage = String(languageIdentifier || "").trim().toLowerCase();
+  if (!appNode || !normalizedLanguage) {
+    return new Map();
+  }
+
+  const manufacturerNode = firstByPath(appNode.ownerDocument?.documentElement, ["ManufacturerData", "Manufacturer"]);
+  const languagesNode = childByName(manufacturerNode, "Languages");
+  if (!languagesNode) {
+    return new Map();
+  }
+
+  const languageNode = childElements(languagesNode, "Language").find(
+    (candidateNode) => attr(candidateNode, "Identifier").trim().toLowerCase() === normalizedLanguage
+  );
+  if (!languageNode) {
+    return new Map();
+  }
+
+  const translations = new Map();
+  for (const translationUnitNode of childElements(languageNode, "TranslationUnit")) {
+    for (const translationElementNode of childElements(translationUnitNode, "TranslationElement")) {
+      const refId = attr(translationElementNode, "RefId");
+      if (!refId) {
+        continue;
+      }
+
+      const translatedAttributes = Object.create(null);
+      for (const translationNode of childElements(translationElementNode, "Translation")) {
+        const attributeName = attr(translationNode, "AttributeName");
+        if (!attributeName) {
+          continue;
+        }
+
+        translatedAttributes[attributeName] = attr(translationNode, "Text");
+      }
+
+      if (Object.keys(translatedAttributes).length > 0) {
+        translations.set(refId, translatedAttributes);
+      }
+    }
+  }
+
+  return translations;
+}
+
+function resolveTranslatedAttribute(node, name) {
+  if (!node || !TRANSLATABLE_ATTRIBUTES.has(name) || typeof node.getAttribute !== "function") {
+    return null;
+  }
+
+  const ownerDocument = node.ownerDocument || node;
+  const translationMap = translationMapsByDocument.get(ownerDocument);
+  if (!translationMap) {
+    return null;
+  }
+
+  const refId = node.getAttribute("Id") || node.getAttribute("RefId");
+  if (!refId || !translationMap.has(refId)) {
+    return null;
+  }
+
+  const translatedAttributes = translationMap.get(refId);
+  if (!translatedAttributes || !Object.prototype.hasOwnProperty.call(translatedAttributes, name)) {
+    return null;
+  }
+
+  return translatedAttributes[name];
+}
+
 function attr(node, name, fallback = "") {
   if (!node) {
     return fallback;
   }
+
+  const translatedValue = resolveTranslatedAttribute(node, name);
+  if (translatedValue !== null && translatedValue !== undefined && translatedValue !== "") {
+    return translatedValue;
+  }
+
   return node.getAttribute(name) ?? fallback;
 }

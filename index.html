@@ -3,15 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>XML Navigator</title>
+    <title>OpenKNX-XML-Navigator</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <div id="app-shell" class="shell">
       <header class="masthead">
         <div class="masthead-copy">
-          <h1>XML Navigator</h1>
-          <p class="subtitle">Interaktive Vorschau fuer expandierte XML mit Navigation, Bedingungen und Parameteransicht.</p>
+          <h1 id="app-title">OpenKNX-XML-Navigator</h1>
+          <p id="app-subtitle" class="subtitle">Interaktive Vorschau fuer expandierte XML mit Navigation, Bedingungen und Parameteransicht.</p>
           <div class="display-toolbar" aria-label="Darstellung">
             <div class="toggle-group" role="group" aria-label="Darstellungsmodus">
               <span class="toolbar-label">Modus</span>
@@ -28,6 +28,7 @@
               <button type="button" class="toggle-pill" data-object-scope-toggle="context" aria-pressed="false">Seite</button>
               <button type="button" class="toggle-pill" data-object-scope-toggle="all" aria-pressed="true">Alle</button>
             </div>
+            <button id="open-about-dialog" type="button" class="ghost toolbar-action">Über OpenKNX-XML-Navigator</button>
           </div>
         </div>
         <form id="source-form" class="source-panel is-collapsed">
@@ -41,9 +42,9 @@
           <div id="source-panel-body" class="source-panel-body">
             <label class="field-label" for="source-select">Bekannte XML-Quelle</label>
             <select id="source-select"></select>
-            <label class="field-label" for="source-file">Lokale XML-Datei</label>
-            <input id="source-file" type="file" accept=".xml,application/xml,text/xml" />
-            <p class="panel-hint">Nutze die Liste fuer Server-Quellen oder waehle eine lokale XML-Datei direkt im Browser.</p>
+            <label class="field-label" for="source-file">Lokale XML-, ZIP- oder KNXPROD-Datei</label>
+            <input id="source-file" type="file" accept=".xml,.zip,.knxprod,application/xml,text/xml,application/zip" />
+            <p class="panel-hint">Nutze die Liste fuer Server-Quellen oder waehle lokal eine XML-Datei, ein ZIP mit XML plus Baggage oder eine KNXPROD-Datei.</p>
             <div class="button-row">
               <button type="submit">Laden</button>
               <button id="load-default-button" type="button" class="ghost">Load default</button>
@@ -55,11 +56,57 @@
 
       <section id="warning-banner" class="warning-banner hidden"></section>
 
+      <div id="knxprod-selection-overlay" class="selection-overlay hidden" aria-hidden="true">
+        <div class="selection-dialog card" role="dialog" aria-modal="true" aria-labelledby="knxprod-selection-title">
+          <div class="selection-dialog-header">
+            <div>
+              <p class="field-label">KNXPROD-Import</p>
+              <h2 id="knxprod-selection-title">Produktsprache(n) auswaehlen</h2>
+            </div>
+          </div>
+          <div class="selection-dialog-body">
+            <p id="knxprod-selection-description" class="panel-hint"></p>
+            <label id="knxprod-product-label" class="field-label hidden" for="knxprod-product-select">Produkt</label>
+            <select id="knxprod-product-select" class="hidden"></select>
+            <label id="knxprod-language-label" class="field-label hidden" for="knxprod-language-select">Sprache</label>
+            <select id="knxprod-language-select" class="hidden"></select>
+          </div>
+          <div class="selection-dialog-actions button-row">
+            <button id="knxprod-selection-confirm" type="button">Auswahl laden</button>
+            <button id="knxprod-selection-cancel" type="button" class="ghost">Abbrechen</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="about-overlay" class="selection-overlay hidden" aria-hidden="true">
+        <div class="selection-dialog about-dialog card" role="dialog" aria-modal="true" aria-labelledby="about-title">
+          <div class="selection-dialog-header">
+            <div>
+              <p class="field-label">Über</p>
+              <h2 id="about-title">OpenKNX-XML-Navigator</h2>
+            </div>
+          </div>
+          <div class="selection-dialog-body about-dialog-body">
+            <p id="about-trademark-note" class="about-note">KNX is a trademark of KNX Association. OpenKNX is an independent project and not affiliated with the OpenKNX-XML-Navigator.</p>
+            <p id="about-public-note" class="about-note hidden"></p>
+            <a id="about-repository-link" class="about-repository-link" href="https://github.com/kikakeule/OpenKNX-XML-Navigator" target="_blank" rel="noreferrer">
+              <span id="about-repository-label">GitHub</span>
+            </a>
+          </div>
+          <div class="selection-dialog-actions button-row">
+            <button id="close-about-dialog" type="button" class="ghost">Schließen</button>
+          </div>
+        </div>
+      </div>
+
       <main class="workspace">
-        <aside class="sidebar card">
+        <aside id="navigation-panel" class="sidebar card">
           <div class="sidebar-header">
-            <h2>Navigation</h2>
-            <p id="stats-text"></p>
+            <div class="panel-header-copy">
+              <h2>Navigation</h2>
+              <p id="stats-text"></p>
+            </div>
+            <button id="toggle-navigation-panel" type="button" class="ghost panel-toggle panel-section-toggle" aria-expanded="true" aria-controls="navigation-tree">Ausklappen</button>
           </div>
           <nav id="navigation-tree" class="navigation-tree"></nav>
         </aside>
@@ -94,12 +141,13 @@
             <div id="page-content" class="page-content"></div>
           </section>
 
-          <section class="help-frame card">
+          <section id="help-panel" class="help-frame card">
             <div class="help-header">
-              <div>
+              <div class="panel-header-copy">
                 <p id="help-context" class="breadcrumbs"></p>
                 <h2 id="help-title">Kontexthilfe</h2>
               </div>
+              <button id="toggle-help-panel" type="button" class="ghost panel-toggle panel-section-toggle" aria-expanded="true" aria-controls="help-content">Ausklappen</button>
             </div>
             <div id="help-content" class="help-content">
               Die Hilfetexte werden geladen.

@@ -32,12 +32,17 @@ const state = {
   explicitHelpContext: "",
   explicitHelpLabel: "",
   helpTexts: {},
+  isHelpPanelCollapsed: false,
+  isNavigationPanelCollapsed: false,
   isSourcePanelCollapsed: true,
+  isStackedLayout: false,
   layoutMode: DEFAULT_LAYOUT_MODE,
   localSourceName: "",
   model: null,
   objectScope: DEFAULT_OBJECT_SCOPE,
+  pendingKnxprodSelection: null,
   presentationMode: DEFAULT_PRESENTATION_MODE,
+  selectedLanguage: "",
   selectedNodeId: null,
   selectedSource: "",
   sourceOrigin: "server",
@@ -49,15 +54,34 @@ const state = {
 };
 
 const elements = {
+  aboutOverlay: document.querySelector("#about-overlay"),
+  aboutRepositoryLabel: document.querySelector("#about-repository-label"),
+  aboutRepositoryLink: document.querySelector("#about-repository-link"),
+  aboutTitle: document.querySelector("#about-title"),
+  aboutTrademarkNote: document.querySelector("#about-trademark-note"),
+  appSubtitle: document.querySelector("#app-subtitle"),
+  appTitle: document.querySelector("#app-title"),
   appStatus: document.querySelector("#app-status"),
   breadcrumbs: document.querySelector("#breadcrumbs"),
+  closeAboutDialog: document.querySelector("#close-about-dialog"),
   defaultButton: document.querySelector("#load-default-button"),
   helpContent: document.querySelector("#help-content"),
   helpContext: document.querySelector("#help-context"),
+  helpPanel: document.querySelector("#help-panel"),
   helpTitle: document.querySelector("#help-title"),
+  knxprodSelectionCancel: document.querySelector("#knxprod-selection-cancel"),
+  knxprodSelectionConfirm: document.querySelector("#knxprod-selection-confirm"),
+  knxprodSelectionDescription: document.querySelector("#knxprod-selection-description"),
+  knxprodSelectionLanguageLabel: document.querySelector("#knxprod-language-label"),
+  knxprodSelectionLanguageSelect: document.querySelector("#knxprod-language-select"),
+  knxprodSelectionOverlay: document.querySelector("#knxprod-selection-overlay"),
+  knxprodSelectionProductLabel: document.querySelector("#knxprod-product-label"),
+  knxprodSelectionProductSelect: document.querySelector("#knxprod-product-select"),
   layoutModeButtons: Array.from(document.querySelectorAll("[data-layout-mode-toggle]")),
+  navigationPanel: document.querySelector("#navigation-panel"),
   navigationTree: document.querySelector("#navigation-tree"),
   objectScopeButtons: Array.from(document.querySelectorAll("[data-object-scope-toggle]")),
+  openAboutDialog: document.querySelector("#open-about-dialog"),
   pageContent: document.querySelector("#page-content"),
   pageMeta: document.querySelector("#page-meta"),
   pageTitle: document.querySelector("#page-title"),
@@ -72,6 +96,8 @@ const elements = {
   tabChannelsCount: document.querySelector("#tab-channels-count"),
   tabObjectsCount: document.querySelector("#tab-objects-count"),
   tabParametersCount: document.querySelector("#tab-parameters-count"),
+  toggleHelpPanel: document.querySelector("#toggle-help-panel"),
+  toggleNavigationPanel: document.querySelector("#toggle-navigation-panel"),
   toggleSourcePanel: document.querySelector("#toggle-source-panel"),
   uiModeButtons: Array.from(document.querySelectorAll("[data-ui-mode-toggle]")),
   warningBanner: document.querySelector("#warning-banner"),
@@ -82,12 +108,20 @@ bootstrap().catch((error) => {
 });
 
 async function bootstrap() {
+  await loadAppConfig();
   bindEvents();
   restoreDisplayPreferences();
   applyDisplayPreferences();
   setSourcePanelCollapsed(state.isSourcePanelCollapsed);
+  syncResponsivePanelState(true);
   updateSourceSummary();
   await refreshSources();
+  const remoteSourceUrl = resolveRemoteSourceUrlFromLocation();
+  if (remoteSourceUrl) {
+    await loadRemoteSourceFromUrl(remoteSourceUrl);
+    return;
+  }
+
   if (state.defaultSource) {
     await loadDefaultSource();
   } else if (elements.sourceSelect.value) {
@@ -97,7 +131,69 @@ async function bootstrap() {
   }
 }
 
+async function loadAppConfig() {
+  try {
+    const response = await fetch("/api/config");
+    if (!response.ok) {
+      return;
+    }
+
+    applyAppConfig(await response.json());
+  } catch {
+    // Keep built-in defaults when the config endpoint is unavailable.
+  }
+}
+
+function applyAppConfig(config) {
+  if (!config || typeof config !== "object") {
+    return;
+  }
+
+  const appTitle = String(config.appTitle || "").trim();
+  const appSubtitle = String(config.appSubtitle || "").trim();
+  const trademarkNotice = String(config.trademarkNotice || "").trim();
+  const repositoryUrl = String(config.repositoryUrl || "").trim();
+  const repositoryLabel = String(config.repositoryLabel || "").trim();
+
+  if (appTitle) {
+    document.title = appTitle;
+    elements.appTitle.textContent = appTitle;
+    elements.aboutTitle.textContent = appTitle;
+    elements.openAboutDialog.textContent = `Über ${appTitle}`;
+  }
+
+  if (appSubtitle) {
+    elements.appSubtitle.textContent = appSubtitle;
+  }
+
+  if (trademarkNotice) {
+    elements.aboutTrademarkNote.textContent = trademarkNotice;
+  }
+
+  if (repositoryUrl) {
+    elements.aboutRepositoryLink.href = repositoryUrl;
+  }
+
+  if (repositoryLabel) {
+    elements.aboutRepositoryLabel.textContent = repositoryLabel;
+  }
+}
+
 function bindEvents() {
+  elements.openAboutDialog.addEventListener("click", () => {
+    setAboutDialogOpen(true);
+  });
+
+  elements.closeAboutDialog.addEventListener("click", () => {
+    setAboutDialogOpen(false);
+  });
+
+  elements.aboutOverlay.addEventListener("click", (event) => {
+    if (event.target === elements.aboutOverlay) {
+      setAboutDialogOpen(false);
+    }
+  });
+
   elements.sourceForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     await loadSelectedSource();
@@ -119,12 +215,46 @@ function bindEvents() {
     setSourcePanelCollapsed(!state.isSourcePanelCollapsed);
   });
 
+  elements.toggleNavigationPanel.addEventListener("click", () => {
+    setNavigationPanelCollapsed(!state.isNavigationPanelCollapsed);
+  });
+
+  elements.toggleHelpPanel.addEventListener("click", () => {
+    setHelpPanelCollapsed(!state.isHelpPanelCollapsed);
+  });
+
   elements.defaultButton.addEventListener("click", async () => {
     await loadDefaultSource();
   });
 
   elements.sourceFile.addEventListener("change", async (event) => {
     await handleLocalSourceSelection(event);
+  });
+
+  elements.knxprodSelectionProductSelect.addEventListener("change", () => {
+    updateKnxprodLanguageOptions();
+  });
+
+  elements.knxprodSelectionConfirm.addEventListener("click", () => {
+    const selectedProduct = getSelectedKnxprodProduct();
+    if (!selectedProduct) {
+      resolveKnxprodSelection(null);
+      return;
+    }
+
+    const languageId = elements.knxprodSelectionLanguageSelect.classList.contains("hidden")
+      ? selectedProduct.defaultLanguage || selectedProduct.languages?.[0] || ""
+      : elements.knxprodSelectionLanguageSelect.value;
+
+    resolveKnxprodSelection({
+      languageId,
+      productId: selectedProduct.productId || selectedProduct.applicationProgramId || "",
+      sessionId: state.pendingKnxprodSelection?.payload?.sessionId || "",
+    });
+  });
+
+  elements.knxprodSelectionCancel.addEventListener("click", () => {
+    resolveKnxprodSelection(null);
   });
 
   for (const button of elements.uiModeButtons) {
@@ -158,6 +288,21 @@ function bindEvents() {
       render();
     });
   }
+
+  window.addEventListener("resize", () => {
+    syncResponsivePanelState();
+  });
+
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !elements.aboutOverlay.classList.contains("hidden")) {
+      setAboutDialogOpen(false);
+    }
+  });
+}
+
+function setAboutDialogOpen(isOpen) {
+  elements.aboutOverlay.classList.toggle("hidden", !isOpen);
+  elements.aboutOverlay.setAttribute("aria-hidden", String(!isOpen));
 }
 
 async function refreshSources() {
@@ -255,25 +400,112 @@ async function handleLocalSourceSelection(event) {
 
   try {
     setStatus(`Lade ${file.name} ...`);
-    const xmlText = await file.text();
-    applyLoadedXml(xmlText, {
-      helpTexts: {},
-      localSourceName: file.name,
-      selectedSource: "",
+    const payload = await uploadLocalSource(file);
+    if (!payload) {
+      clearStatus();
+      return;
+    }
+
+    applyLoadedXml(payload.xmlText, {
+      helpTexts: payload.helpTexts || {},
+      localSourceName: payload.sourceLabel || file.name,
+      selectedLanguage: payload.languageId || "",
+      selectedSource: payload.iconCount > 0 ? payload.sourceId || "" : "",
       sourceOrigin: "local",
     });
+  } catch (error) {
+    setStatus(error.message || `Die Datei ${file.name} konnte nicht geladen werden.`, true);
   } finally {
     event.target.value = "";
   }
+}
+
+async function uploadLocalSource(file) {
+  const response = await fetch("/api/upload-source", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/octet-stream",
+      "X-File-Name": encodeURIComponent(file.name || "upload.xml"),
+    },
+    body: await file.arrayBuffer(),
+  });
+
+  if (!response.ok) {
+    const message = await safeErrorMessage(response);
+    throw new Error(message || `Die Datei ${file.name} konnte nicht geladen werden.`);
+  }
+
+  return resolveImportedPayload(await response.json(), file.name);
+}
+
+async function loadRemoteSourceFromUrl(sourceUrl) {
+  const trimmedSourceUrl = String(sourceUrl || "").trim();
+  if (!trimmedSourceUrl) {
+    throw new Error("Die Remote-Quelle ist leer.");
+  }
+
+  const response = await fetch("/api/import-remote", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ url: trimmedSourceUrl }),
+  });
+
+  if (!response.ok) {
+    const message = await safeErrorMessage(response);
+    throw new Error(message || "Die Remote-Quelle konnte nicht geladen werden.");
+  }
+
+  const payload = await resolveImportedPayload(await response.json(), trimmedSourceUrl);
+  if (!payload) {
+    clearStatus();
+    return;
+  }
+
+  applyLoadedXml(payload.xmlText, {
+    helpTexts: payload.helpTexts || {},
+    localSourceName: payload.sourceLabel || trimmedSourceUrl,
+    selectedLanguage: payload.languageId || "",
+    selectedSource: payload.iconCount > 0 ? payload.sourceId || "" : "",
+    sourceOrigin: "remote",
+  });
+}
+
+async function resolveImportedPayload(payload, sourceLabel) {
+  if (!payload.selectionRequired) {
+    return payload;
+  }
+
+  const selection = await promptKnxprodSelection(payload);
+  if (!selection) {
+    return null;
+  }
+
+  const resolveResponse = await fetch("/api/upload-source/resolve", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(selection),
+  });
+
+  if (!resolveResponse.ok) {
+    const message = await safeErrorMessage(resolveResponse);
+    throw new Error(message || `Die Quelle ${sourceLabel} konnte nicht geladen werden.`);
+  }
+
+  return resolveResponse.json();
 }
 
 function applyLoadedXml(xmlText, options) {
   const nextOptions = options || {};
 
   state.localSourceName = nextOptions.localSourceName || "";
+  state.selectedLanguage = nextOptions.selectedLanguage || "";
   state.selectedSource = nextOptions.selectedSource || "";
   state.sourceOrigin = nextOptions.sourceOrigin || "server";
-  state.model = buildSimulatorModel(xmlText);
+  state.model = buildSimulatorModel(xmlText, { language: state.selectedLanguage });
   state.helpTexts = nextOptions.helpTexts || {};
   state.userState = { ...state.model.initialState };
   state.explicitHelpContext = "";
@@ -290,6 +522,38 @@ function setSourcePanelCollapsed(isCollapsed) {
   elements.sourceForm.classList.toggle("is-collapsed", isCollapsed);
   elements.toggleSourcePanel.textContent = isCollapsed ? "Ausklappen" : "Minimieren";
   elements.toggleSourcePanel.setAttribute("aria-expanded", String(!isCollapsed));
+}
+
+function setNavigationPanelCollapsed(isCollapsed) {
+  state.isNavigationPanelCollapsed = isCollapsed;
+  elements.navigationPanel.classList.toggle("is-collapsed", isCollapsed);
+  elements.toggleNavigationPanel.textContent = isCollapsed ? "Ausklappen" : "Minimieren";
+  elements.toggleNavigationPanel.setAttribute("aria-expanded", String(!isCollapsed));
+}
+
+function setHelpPanelCollapsed(isCollapsed) {
+  state.isHelpPanelCollapsed = isCollapsed;
+  elements.helpPanel.classList.toggle("is-collapsed", isCollapsed);
+  elements.toggleHelpPanel.textContent = isCollapsed ? "Ausklappen" : "Minimieren";
+  elements.toggleHelpPanel.setAttribute("aria-expanded", String(!isCollapsed));
+}
+
+function isStackedWorkspaceLayout() {
+  return window.matchMedia("(max-width: 1024px), (max-height: 760px)").matches;
+}
+
+function syncResponsivePanelState(force = false) {
+  const isStackedLayout = isStackedWorkspaceLayout();
+  const layoutChanged = force || state.isStackedLayout !== isStackedLayout;
+  state.isStackedLayout = isStackedLayout;
+  elements.shell.classList.toggle("is-stacked-layout", isStackedLayout);
+
+  if (!layoutChanged) {
+    return;
+  }
+
+  setNavigationPanelCollapsed(isStackedLayout);
+  setHelpPanelCollapsed(isStackedLayout);
 }
 
 function restoreDisplayPreferences() {
@@ -335,7 +599,9 @@ function syncToggleButtons(buttons, dataKey, activeValue) {
 
 function updateSourceSummary() {
   const fullLabel = resolveSourceSummaryLabel();
-  const shortLabel = fullLabel ? extractFileName(fullLabel) : "Noch keine XML ausgewaehlt";
+  const shortLabel = fullLabel
+    ? (state.sourceOrigin === "server" ? extractFileName(fullLabel) : fullLabel)
+    : "Noch keine XML ausgewaehlt";
   elements.sourceSummary.textContent = shortLabel;
 
   if (fullLabel) {
@@ -346,16 +612,142 @@ function updateSourceSummary() {
 }
 
 function resolveSourceSummaryLabel() {
-  if (state.sourceOrigin === "local" && state.localSourceName) {
+  if (state.sourceOrigin !== "server" && state.localSourceName) {
     return state.localSourceName;
   }
 
   return state.selectedSource || elements.sourceSelect.value || state.defaultSource || "";
 }
 
+function resolveRemoteSourceUrlFromLocation() {
+  const searchParams = new URLSearchParams(window.location.search || "");
+  return searchParams.get("knxprod")
+    || searchParams.get("sourceUrl")
+    || searchParams.get("source")
+    || searchParams.get("url")
+    || "";
+}
+
 function extractFileName(path) {
   const segments = String(path || "").split(/[\\/]/).filter(Boolean);
   return segments[segments.length - 1] || "";
+}
+
+async function promptKnxprodSelection(payload) {
+  const products = Array.isArray(payload.products) ? payload.products : [];
+  if (!products.length) {
+    throw new Error("Das KNXPROD enthaelt keine waehlbaren Produkte.");
+  }
+
+  state.pendingKnxprodSelection = {
+    payload,
+    resolve: null,
+  };
+
+  const descriptionParts = [];
+  if (products.length > 1) {
+    descriptionParts.push("Waehle das Produkt aus dem KNXPROD-Paket aus.");
+  }
+  if (products.some((product) => (product.languages || []).length > 1)) {
+    descriptionParts.push("Waehle die Sprache fuer die Navigator-Texte aus.");
+  }
+  elements.knxprodSelectionDescription.textContent = descriptionParts.join(" ") || "Waehle den passenden KNXPROD-Import aus.";
+
+  populateKnxprodProductOptions(products);
+  updateKnxprodLanguageOptions();
+  showKnxprodSelectionOverlay(true);
+
+  return new Promise((resolve) => {
+    state.pendingKnxprodSelection.resolve = resolve;
+  });
+}
+
+function populateKnxprodProductOptions(products) {
+  elements.knxprodSelectionProductSelect.innerHTML = "";
+  const showProductSelect = products.length > 1;
+  toggleKnxprodSelectionField(elements.knxprodSelectionProductLabel, elements.knxprodSelectionProductSelect, showProductSelect);
+
+  for (const product of products) {
+    const option = document.createElement("option");
+    option.value = product.productId || product.applicationProgramId || "";
+    option.textContent = product.productLabel || product.productText || product.applicationProgramId || "Produkt";
+    elements.knxprodSelectionProductSelect.append(option);
+  }
+
+  if (products[0]) {
+    elements.knxprodSelectionProductSelect.value = products[0].productId || products[0].applicationProgramId || "";
+  }
+}
+
+function updateKnxprodLanguageOptions() {
+  const selectedProduct = getSelectedKnxprodProduct();
+  const languages = Array.isArray(selectedProduct?.languages) ? selectedProduct.languages : [];
+  const showLanguageSelect = languages.length > 1;
+  toggleKnxprodSelectionField(elements.knxprodSelectionLanguageLabel, elements.knxprodSelectionLanguageSelect, showLanguageSelect);
+
+  elements.knxprodSelectionLanguageSelect.innerHTML = "";
+  for (const identifier of languages) {
+    const option = document.createElement("option");
+    option.value = identifier;
+    option.textContent = formatLanguageLabel(identifier);
+    elements.knxprodSelectionLanguageSelect.append(option);
+  }
+
+  const defaultLanguage = selectedProduct?.defaultLanguage || languages[0] || "";
+  if (defaultLanguage) {
+    elements.knxprodSelectionLanguageSelect.value = defaultLanguage;
+  }
+}
+
+function toggleKnxprodSelectionField(labelElement, fieldElement, isVisible) {
+  labelElement.classList.toggle("hidden", !isVisible);
+  fieldElement.classList.toggle("hidden", !isVisible);
+}
+
+function getSelectedKnxprodProduct() {
+  const products = state.pendingKnxprodSelection?.payload?.products || [];
+  const selectedProductId = elements.knxprodSelectionProductSelect.value;
+  return products.find((product) => (product.productId || product.applicationProgramId) === selectedProductId) || products[0] || null;
+}
+
+function showKnxprodSelectionOverlay(isVisible) {
+  elements.knxprodSelectionOverlay.classList.toggle("hidden", !isVisible);
+  elements.knxprodSelectionOverlay.setAttribute("aria-hidden", String(!isVisible));
+}
+
+function resolveKnxprodSelection(selection) {
+  const pendingSelection = state.pendingKnxprodSelection;
+  if (!pendingSelection?.resolve) {
+    return;
+  }
+
+  const resolver = pendingSelection.resolve;
+  state.pendingKnxprodSelection = null;
+  showKnxprodSelectionOverlay(false);
+  resolver(selection);
+}
+
+function formatLanguageLabel(identifier) {
+  const normalizedIdentifier = String(identifier || "").trim();
+  if (!normalizedIdentifier) {
+    return "";
+  }
+
+  try {
+    const locale = normalizedIdentifier.replace(/_/g, "-");
+    const localeParts = locale.split("-");
+    const languageName = new Intl.DisplayNames(["de-DE"], { type: "language" }).of(localeParts[0]);
+    const regionPart = localeParts.find((part) => /^[A-Z]{2}$/i.test(part));
+    const regionName = regionPart
+      ? new Intl.DisplayNames(["de-DE"], { type: "region" }).of(regionPart.toUpperCase())
+      : "";
+    if (languageName && regionName) {
+      return `${languageName} (${regionName})`;
+    }
+    return languageName || normalizedIdentifier;
+  } catch {
+    return normalizedIdentifier;
+  }
 }
 
 function updateDerivedState() {
@@ -493,6 +885,9 @@ function createNavigationButton(entry, depth = 0, hasChildren = false) {
     state.selectedNodeId = nodeId;
     state.explicitHelpContext = "";
     state.explicitHelpLabel = "";
+    if (state.isStackedLayout && !hasChildren) {
+      setNavigationPanelCollapsed(true);
+    }
     render();
   });
   return button;
@@ -1448,7 +1843,7 @@ function buildNavigationEntries(nodes) {
 }
 
 function buildNavigationEntry(node) {
-  if (node.kind === "channel") {
+  if (node.kind === "channel" || node.kind === "channelIndependentBlock") {
     return {
       children: buildNavigationEntries(node.visibleChildren || []),
       icon: node.icon || "",
@@ -1470,7 +1865,7 @@ function buildNavigationEntry(node) {
 }
 
 function getVisibleRootChannels(nodes) {
-  return nodes.filter((node) => node.kind === "channel");
+  return nodes.filter((node) => node.kind === "channel" || node.kind === "channelIndependentBlock");
 }
 
 function collectVisibleNodeIds(nodes, ids = new Set()) {
