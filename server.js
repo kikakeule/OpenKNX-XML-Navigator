@@ -298,6 +298,19 @@ function loadIcon(relativeFile, iconName) {
     }
   }
 
+  for (const extension of [".png", ".svg", ".webp"]) {
+    const fileName = `${normalizedName}${extension}`;
+    const assetPath = findFileRecursive(resolveBaggageRoot(relativeFile), fileName);
+    if (!assetPath) {
+      continue;
+    }
+
+    return {
+      body: fs.readFileSync(assetPath),
+      contentType: contentTypes[extension] || "application/octet-stream",
+    };
+  }
+
   return null;
 }
 

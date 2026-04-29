@@ -20,6 +20,10 @@ const HIDDEN_PARAMETER_NAMES = new Set([
   "LED_DisplayNumChannels",
 ]);
 const HIDDEN_PARAMETER_PATTERNS = [/^LED_HardwareVariant(?:Has|Can)/];
+const DEFAULT_LAYOUT_MODE = "fixed";
+const DEFAULT_PRESENTATION_MODE = "view";
+const LAYOUT_MODE_STORAGE_KEY = "openknxXmlNavigator.layoutMode";
+const PRESENTATION_MODE_STORAGE_KEY = "openknxXmlNavigator.presentationMode";
 
 const state = {
   defaultSource: "",
@@ -28,8 +32,10 @@ const state = {
   explicitHelpLabel: "",
   helpTexts: {},
   isSourcePanelCollapsed: true,
+  layoutMode: DEFAULT_LAYOUT_MODE,
   localSourceName: "",
   model: null,
+  presentationMode: DEFAULT_PRESENTATION_MODE,
   selectedNodeId: null,
   selectedSource: "",
   sourceOrigin: "server",
@@ -47,11 +53,13 @@ const elements = {
   helpContent: document.querySelector("#help-content"),
   helpContext: document.querySelector("#help-context"),
   helpTitle: document.querySelector("#help-title"),
+  layoutModeButtons: Array.from(document.querySelectorAll("[data-layout-mode-toggle]")),
   navigationTree: document.querySelector("#navigation-tree"),
   pageContent: document.querySelector("#page-content"),
   pageMeta: document.querySelector("#page-meta"),
   pageTitle: document.querySelector("#page-title"),
   reloadButton: document.querySelector("#reload-button"),
+  shell: document.querySelector("#app-shell"),
   sourceFile: document.querySelector("#source-file"),
   sourceForm: document.querySelector("#source-form"),
   sourceSelect: document.querySelector("#source-select"),
@@ -62,6 +70,7 @@ const elements = {
   tabObjectsCount: document.querySelector("#tab-objects-count"),
   tabParametersCount: document.querySelector("#tab-parameters-count"),
   toggleSourcePanel: document.querySelector("#toggle-source-panel"),
+  uiModeButtons: Array.from(document.querySelectorAll("[data-ui-mode-toggle]")),
   warningBanner: document.querySelector("#warning-banner"),
 };
 
@@ -71,6 +80,8 @@ bootstrap().catch((error) => {
 
 async function bootstrap() {
   bindEvents();
+  restoreDisplayPreferences();
+  applyDisplayPreferences();
   setSourcePanelCollapsed(state.isSourcePanelCollapsed);
   updateSourceSummary();
   await refreshSources();
@@ -89,6 +100,14 @@ function bindEvents() {
     await loadSelectedSource();
   });
 
+  elements.sourceSelect.addEventListener("change", () => {
+    if (elements.sourceSelect.value) {
+      state.localSourceName = "";
+      state.sourceOrigin = "server";
+    }
+    updateSourceSummary();
+  });
+
   elements.reloadButton.addEventListener("click", async () => {
     await refreshSources();
   });
@@ -104,6 +123,23 @@ function bindEvents() {
   elements.sourceFile.addEventListener("change", async (event) => {
     await handleLocalSourceSelection(event);
   });
+
+  for (const button of elements.uiModeButtons) {
+    button.addEventListener("click", () => {
+      state.presentationMode = button.dataset.uiModeToggle || DEFAULT_PRESENTATION_MODE;
+      persistDisplayPreference(PRESENTATION_MODE_STORAGE_KEY, state.presentationMode);
+      applyDisplayPreferences();
+      render();
+    });
+  }
+
+  for (const button of elements.layoutModeButtons) {
+    button.addEventListener("click", () => {
+      state.layoutMode = button.dataset.layoutModeToggle || DEFAULT_LAYOUT_MODE;
+      persistDisplayPreference(LAYOUT_MODE_STORAGE_KEY, state.layoutMode);
+      applyDisplayPreferences();
+    });
+  }
 
   for (const tabButton of elements.tabButtons) {
     tabButton.addEventListener("click", () => {
@@ -245,6 +281,46 @@ function setSourcePanelCollapsed(isCollapsed) {
   elements.toggleSourcePanel.setAttribute("aria-expanded", String(!isCollapsed));
 }
 
+function restoreDisplayPreferences() {
+  state.presentationMode = readStoredPreference(PRESENTATION_MODE_STORAGE_KEY, new Set(["view", "dev"]), DEFAULT_PRESENTATION_MODE);
+  state.layoutMode = readStoredPreference(LAYOUT_MODE_STORAGE_KEY, new Set(["fixed", "fluid"]), DEFAULT_LAYOUT_MODE);
+}
+
+function readStoredPreference(key, allowedValues, fallbackValue) {
+  try {
+    const storedValue = window.localStorage.getItem(key);
+    return allowedValues.has(storedValue) ? storedValue : fallbackValue;
+  } catch {
+    return fallbackValue;
+  }
+}
+
+function persistDisplayPreference(key, value) {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    // Ignore unavailable storage and keep the in-memory preference.
+  }
+}
+
+function applyDisplayPreferences() {
+  if (elements.shell) {
+    elements.shell.dataset.uiMode = state.presentationMode;
+    elements.shell.dataset.layoutMode = state.layoutMode;
+  }
+
+  syncToggleButtons(elements.uiModeButtons, "uiModeToggle", state.presentationMode);
+  syncToggleButtons(elements.layoutModeButtons, "layoutModeToggle", state.layoutMode);
+}
+
+function syncToggleButtons(buttons, dataKey, activeValue) {
+  for (const button of buttons) {
+    const isActive = button.dataset[dataKey] === activeValue;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-pressed", String(isActive));
+  }
+}
+
 function updateSourceSummary() {
   const fullLabel = resolveSourceSummaryLabel();
   const shortLabel = fullLabel ? extractFileName(fullLabel) : "Noch keine XML ausgewaehlt";
@@ -348,43 +424,45 @@ function renderNavigation() {
   }
 
   for (const entry of entries) {
-    elements.navigationTree.append(renderNavigationEntry(entry));
+    elements.navigationTree.append(renderNavigationEntry(entry, 0));
   }
 }
 
-function renderNavigationEntry(entry) {
+function renderNavigationEntry(entry, depth = 0) {
   const containsSelection = entryContainsSelection(entry, state.selectedNodeId);
 
   if (entry.children.length === 0) {
     const item = document.createElement("div");
     item.className = "nav-item";
-    item.append(createNavigationButton(entry));
+    item.append(createNavigationButton(entry, depth, false));
     return item;
   }
 
   const details = document.createElement("details");
-  details.className = "nav-group nav-branch";
+  details.className = "nav-group";
   details.open = containsSelection;
 
   const summary = document.createElement("summary");
-  summary.append(createNavigationButton(entry));
+  summary.append(createNavigationButton(entry, depth, true));
   details.append(summary);
 
   const branch = document.createElement("div");
-  branch.className = "nav-branch";
+  branch.className = "nav-children";
   for (const childEntry of entry.children) {
-    branch.append(renderNavigationEntry(childEntry));
+    branch.append(renderNavigationEntry(childEntry, depth + 1));
   }
   details.append(branch);
   return details;
 }
 
-function createNavigationButton(entry) {
+function createNavigationButton(entry, depth = 0, hasChildren = false) {
   const label = entry.label || entry.labelNodeId;
   const nodeId = entry.labelNodeId;
   const button = document.createElement("button");
   button.type = "button";
   button.className = "nav-link";
+  button.classList.add(hasChildren ? "is-branch" : "is-leaf");
+  button.style.setProperty("--nav-depth", String(depth));
   if (nodeId === state.selectedNodeId) {
     button.classList.add("is-selected");
   }
@@ -461,7 +539,23 @@ function deriveIconFallback(iconName, label) {
 }
 
 function buildIconUrl(iconName) {
-  return `/api/icon?file=${encodeURIComponent(state.selectedSource)}&icon=${encodeURIComponent(iconName)}`;
+  const sourceFile = state.selectedSource || elements.sourceSelect?.value || state.defaultSource || "";
+  return `/api/icon?file=${encodeURIComponent(sourceFile)}&icon=${encodeURIComponent(iconName)}`;
+}
+
+function buildPictureUrl(refId) {
+  const iconName = extractPictureIconName(refId);
+  return iconName ? buildIconUrl(iconName) : "";
+}
+
+function extractPictureIconName(refId) {
+  const ref = String(refId || "").trim();
+  if (!ref) {
+    return "";
+  }
+
+  const tail = ref.split("-").pop() || "";
+  return tail.replace(/\.2E(?:png|svg|webp)$/i, "").toLowerCase();
 }
 
 function entryContainsSelection(entry, selectedNodeId) {
@@ -629,14 +723,14 @@ function renderChannelOverview(selectedNode) {
   elements.pageContent.append(channelGrid);
 }
 
-function renderNode(node) {
+function renderNode(node, options = {}) {
   switch (node.kind) {
     case "parameterBlock":
       return renderParameterBlock(node);
     case "parameterSeparator":
       return renderSeparator(node);
     case "parameterRef":
-      return renderField(node);
+      return renderField(node, options);
     case "comObjectRef":
       return renderComObject(node);
     case "button":
@@ -717,24 +811,30 @@ function renderSeparator(node) {
   return note;
 }
 
-function renderField(node) {
+function renderField(node, options = {}) {
   const description = describeField(node, state.derivedState);
   if (shouldHideField(node, description)) {
     return null;
   }
 
+  const hideTitle = Boolean(options.hideTitle);
   const card = document.createElement("div");
   card.className = `field-card is-indented-${Math.min(node.indentLevel || 0, 3)}`;
+  if (hideTitle) {
+    card.classList.add("is-compact");
+  }
 
   const row = document.createElement("div");
   row.className = "field-row";
 
-  const labelBox = document.createElement("div");
-  const title = document.createElement("div");
-  title.className = "field-title";
-  title.textContent = description.text;
-  labelBox.append(title);
-  row.append(labelBox);
+  if (!hideTitle) {
+    const labelBox = document.createElement("div");
+    const title = document.createElement("div");
+    title.className = "field-title";
+    title.textContent = description.text;
+    labelBox.append(title);
+    row.append(labelBox);
+  }
 
   const inputBox = document.createElement("div");
   inputBox.className = "field-input";
@@ -761,10 +861,12 @@ function buildInputControl(node, description) {
   const isCheckbox = /checkbox/i.test(typeSignature);
   const isYesNoRadio = /onoffyesno|yesno/i.test(typeSignature);
   const isEnum = Array.isArray(typeInfo.enumerations) && typeInfo.enumerations.length > 0;
+  const isBinaryChoiceRadio = isEnum && shouldRenderBinaryChoiceAsRadio(description, typeInfo);
+  const isFloat = typeInfo.type === "TypeFloat";
   const isNumber = typeInfo.type === "TypeNumber";
   const disabled = description.access === "None";
 
-  if (isYesNoRadio && isEnum) {
+  if ((isYesNoRadio || isBinaryChoiceRadio) && isEnum) {
     const group = document.createElement("div");
     group.className = "radio-group";
     const options = [...typeInfo.enumerations].sort((left, right) => Number(left.value) - Number(right.value));
@@ -814,10 +916,14 @@ function buildInputControl(node, description) {
     return select;
   }
 
+  if (typeInfo.type === "TypePicture") {
+    return buildPictureControl(typeInfo, description);
+  }
+
   if (isNumber) {
     const input = document.createElement("input");
     input.type = "number";
-    input.value = description.value;
+    input.value = formatControlValue(description.value, typeInfo);
     input.disabled = disabled;
     if (typeInfo.minInclusive) {
       input.min = typeInfo.minInclusive;
@@ -828,7 +934,25 @@ function buildInputControl(node, description) {
     if (typeInfo.increment) {
       input.step = typeInfo.increment;
     }
-    input.addEventListener("change", () => updateParameter(node.paramRefId, input.value));
+    input.addEventListener("change", () => {
+      const normalizedValue = normalizeControlValue(input.value, typeInfo);
+      input.value = formatControlValue(normalizedValue, typeInfo);
+      updateParameter(node.paramRefId, normalizedValue);
+    });
+    return input;
+  }
+
+  if (isFloat) {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.inputMode = "decimal";
+    input.value = formatControlValue(description.value, typeInfo);
+    input.disabled = disabled;
+    input.addEventListener("change", () => {
+      const normalizedValue = normalizeControlValue(input.value, typeInfo);
+      input.value = formatControlValue(normalizedValue, typeInfo);
+      updateParameter(node.paramRefId, normalizedValue);
+    });
     return input;
   }
 
@@ -838,6 +962,38 @@ function buildInputControl(node, description) {
   input.disabled = disabled;
   input.addEventListener("change", () => updateParameter(node.paramRefId, input.value));
   return input;
+}
+
+function shouldRenderBinaryChoiceAsRadio(description, typeInfo) {
+  if (!typeInfo || !Array.isArray(typeInfo.enumerations) || typeInfo.enumerations.length !== 2) {
+    return false;
+  }
+
+  const label = `${description?.text || ""} ${description?.name || ""}`.trim();
+  return /Empfangen über|CombinedTimeDate/i.test(label);
+}
+
+function buildPictureControl(typeInfo, description) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "picture-field";
+  wrapper.dataset.align = String(typeInfo.pictureAlignment || "right").trim().toLowerCase();
+
+  const imageUrl = buildPictureUrl(typeInfo.pictureRefId);
+  if (!imageUrl) {
+    return wrapper;
+  }
+
+  const image = document.createElement("img");
+  image.className = "picture-field-image";
+  image.alt = description.text || "";
+  image.decoding = "async";
+  image.loading = "lazy";
+  image.src = imageUrl;
+  image.addEventListener("error", () => {
+    image.remove();
+  });
+  wrapper.append(image);
+  return wrapper;
 }
 
 function renderComObject(node) {
@@ -899,6 +1055,9 @@ function renderGridBlock(node) {
   const layout = extractGridLayout(node);
   const card = document.createElement("section");
   card.className = "grid-card";
+  if (layout.activeRows.length <= 1) {
+    card.classList.add("is-single-row-grid");
+  }
 
   const title = hasExplicitBlockText(node) ? resolveTitle(node, state.derivedState) : "";
   if (title) {
@@ -959,7 +1118,29 @@ function renderGridBlock(node) {
 }
 
 function applyGridTableWidth(table, columns) {
-  table.style.width = "100%";
+  if (state.layoutMode !== "fixed") {
+    table.style.width = "100%";
+    table.style.minWidth = "100%";
+    return;
+  }
+
+  const fixedWidth = computeFixedGridTableWidth(columns);
+  table.style.width = `${fixedWidth}px`;
+  table.style.minWidth = `${fixedWidth}px`;
+}
+
+function computeFixedGridTableWidth(columns) {
+  const columnCount = Math.max(columns.length, 1);
+
+  if (columnCount === 1) {
+    return 420;
+  }
+
+  if (columnCount === 2) {
+    return 520;
+  }
+
+  return Math.min(800, Math.max(600, columnCount * 74 + 60));
 }
 
 function appendRenderedNodes(container, nodes) {
@@ -1053,10 +1234,12 @@ function extractGridLayout(node) {
   const columns = node.columns || [];
   const itemsByCell = new Map();
   const overflowNodes = [];
+  const normalizeToSingleRow = (node.rows || []).length <= 1;
 
   for (const childNode of filterRenderableChildren(node.visibleChildren || [], node)) {
     if (childNode.cell) {
-      const key = `${childNode.cell.row}:${childNode.cell.column}`;
+      const rowIndex = normalizeToSingleRow ? 1 : childNode.cell.row;
+      const key = `${rowIndex}:${childNode.cell.column}`;
       if (!itemsByCell.has(key)) {
         itemsByCell.set(key, []);
       }
@@ -1109,7 +1292,7 @@ function appendGridRows(tbody, layout) {
       const stack = document.createElement("div");
       stack.className = "grid-stack";
       for (const cellNode of layout.itemsByCell.get(key) || []) {
-        const rendered = renderNode(cellNode);
+        const rendered = renderNode(cellNode, { hideTitle: state.presentationMode === "view" });
         if (rendered) {
           stack.append(rendered);
         }
@@ -1313,6 +1496,10 @@ function shouldRenderChild(node, parentNode) {
     return false;
   }
 
+  if (state.presentationMode === "view" && state.viewMode === "parameter" && node.kind === "comObjectRef") {
+    return false;
+  }
+
   if (node.kind === "parameterRef") {
     return !shouldHideField(node, describeField(node, state.derivedState));
   }
@@ -1427,6 +1614,85 @@ function valuesMatch(left, right) {
   return Number(left) === Number(right);
 }
 
+function formatControlValue(value, typeInfo) {
+  if (typeInfo?.type === "TypeFloat") {
+    return formatFloatDisplayValue(value);
+  }
+
+  if (typeInfo?.type === "TypeNumber") {
+    return normalizeNumberValue(value);
+  }
+
+  return String(value ?? "");
+}
+
+function normalizeControlValue(value, typeInfo) {
+  if (typeInfo?.type === "TypeFloat") {
+    return normalizeFloatValue(value);
+  }
+
+  if (typeInfo?.type === "TypeNumber") {
+    return normalizeNumberValue(value);
+  }
+
+  return String(value ?? "");
+}
+
+function normalizeNumberValue(value) {
+  const normalized = String(value ?? "").trim().replace(/\s+/g, "");
+  if (!normalized) {
+    return "";
+  }
+
+  const numericValue = Number(normalized);
+  if (!Number.isFinite(numericValue)) {
+    return normalized;
+  }
+
+  return numericValue.toLocaleString("en-US", {
+    maximumFractionDigits: 15,
+    useGrouping: false,
+  });
+}
+
+function normalizeFloatValue(value) {
+  const normalized = String(value ?? "")
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(",", ".");
+
+  if (!normalized) {
+    return "";
+  }
+
+  const numericValue = Number(normalized);
+  if (!Number.isFinite(numericValue)) {
+    return normalized;
+  }
+
+  return numericValue.toLocaleString("en-US", {
+    maximumFractionDigits: 15,
+    useGrouping: false,
+  });
+}
+
+function formatFloatDisplayValue(value) {
+  const normalized = normalizeFloatValue(value);
+  if (!normalized) {
+    return "";
+  }
+
+  const numericValue = Number(normalized);
+  if (!Number.isFinite(numericValue)) {
+    return String(value ?? "");
+  }
+
+  return numericValue.toLocaleString("de-DE", {
+    maximumFractionDigits: 15,
+    useGrouping: false,
+  });
+}
+
 function createEmptyState(text) {
   const emptyState = document.createElement("div");
   emptyState.className = "empty-state";
@@ -1441,6 +1707,11 @@ function clearStatus() {
 }
 
 function setStatus(text, isError = false) {
+  if (!isError) {
+    clearStatus();
+    return;
+  }
+
   elements.appStatus.textContent = text;
   elements.appStatus.classList.remove("hidden");
   elements.appStatus.style.color = isError ? "var(--accent)" : "var(--muted)";

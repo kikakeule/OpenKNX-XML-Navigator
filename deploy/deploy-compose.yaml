@@ -1,6 +1,5 @@
 services:
   openknx-xml-navigator:
-    image: openknx-xml-navigator:deploy
     build:
       context: https://github.com/kikakeule/OpenKNX-XML-Navigator.git#main:.
     container_name: openknx-xml-navigator
@@ -11,3 +10,6 @@ services:
       OPENKNX_XML_NAVIGATOR_PORT: "4173"
       OPENKNX_XML_NAVIGATOR_SOURCE_DIRS: "examples;data"
       OPENKNX_XML_NAVIGATOR_DEFAULT_SOURCE: "examples/LedDimmerAB.debug.xml"
+    # Uncomment if you want additional server-backed XML files from the host.
+    # volumes:
+    #   - /mnt/tank/apps/OpenKNX-XML-Navigator/data:/app/data

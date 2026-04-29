@@ -7,11 +7,23 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="shell">
+    <div id="app-shell" class="shell">
       <header class="masthead">
-        <div>
+        <div class="masthead-copy">
           <h1>XML Navigator</h1>
           <p class="subtitle">Interaktive Vorschau fuer expandierte XML mit Navigation, Bedingungen und Parameteransicht.</p>
+          <div class="display-toolbar" aria-label="Darstellung">
+            <div class="toggle-group" role="group" aria-label="Darstellungsmodus">
+              <span class="toolbar-label">Modus</span>
+              <button type="button" class="toggle-pill" data-ui-mode-toggle="view" aria-pressed="true">Ansicht</button>
+              <button type="button" class="toggle-pill" data-ui-mode-toggle="dev" aria-pressed="false">Dev</button>
+            </div>
+            <div class="toggle-group" role="group" aria-label="Layoutbreite">
+              <span class="toolbar-label">Breite</span>
+              <button type="button" class="toggle-pill" data-layout-mode-toggle="fixed" aria-pressed="true">Fix</button>
+              <button type="button" class="toggle-pill" data-layout-mode-toggle="fluid" aria-pressed="false">Flex</button>
+            </div>
+          </div>
         </div>
         <form id="source-form" class="source-panel is-collapsed">
           <div class="source-panel-header">
@@ -47,47 +59,49 @@
           <nav id="navigation-tree" class="navigation-tree"></nav>
         </aside>
 
-        <section class="content card">
-          <div class="content-header">
-            <div>
-              <p id="breadcrumbs" class="breadcrumbs"></p>
-              <h2 id="page-title">Noch keine XML geladen</h2>
+        <section class="detail-pane">
+          <section class="content card">
+            <div class="content-header">
+              <div>
+                <p id="breadcrumbs" class="breadcrumbs"></p>
+                <h2 id="page-title">Noch keine XML geladen</h2>
+              </div>
+              <div id="page-meta" class="page-meta"></div>
             </div>
-            <div id="page-meta" class="page-meta"></div>
-          </div>
 
-          <div class="tab-bar" role="tablist" aria-label="Navigator Ansichten">
-            <button type="button" class="tab-button" data-view="channels" role="tab" aria-selected="false">
-              <span>Kanaele</span>
-              <span id="tab-channels-count" class="tab-count">0</span>
-            </button>
-            <button type="button" class="tab-button" data-view="objects" role="tab" aria-selected="false">
-              <span>Kommunikationsobjekte</span>
-              <span id="tab-objects-count" class="tab-count">0</span>
-            </button>
-            <button type="button" class="tab-button is-active" data-view="parameter" role="tab" aria-selected="true">
-              <span>Parameter</span>
-              <span id="tab-parameters-count" class="tab-count">0</span>
-            </button>
-          </div>
+            <div class="tab-bar" role="tablist" aria-label="Navigator Ansichten">
+              <button type="button" class="tab-button" data-view="channels" role="tab" aria-selected="false">
+                <span>Kanaele</span>
+                <span id="tab-channels-count" class="tab-count">0</span>
+              </button>
+              <button type="button" class="tab-button" data-view="objects" role="tab" aria-selected="false">
+                <span>Kommunikationsobjekte</span>
+                <span id="tab-objects-count" class="tab-count">0</span>
+              </button>
+              <button type="button" class="tab-button is-active" data-view="parameter" role="tab" aria-selected="true">
+                <span>Parameter</span>
+                <span id="tab-parameters-count" class="tab-count">0</span>
+              </button>
+            </div>
 
-          <div id="app-status" class="status-panel hidden" aria-live="polite"></div>
+            <div id="app-status" class="status-panel hidden" aria-live="polite"></div>
 
-          <div id="page-content" class="page-content"></div>
+            <div id="page-content" class="page-content"></div>
+          </section>
+
+          <section class="help-frame card">
+            <div class="help-header">
+              <div>
+                <p id="help-context" class="breadcrumbs"></p>
+                <h2 id="help-title">Kontexthilfe</h2>
+              </div>
+            </div>
+            <div id="help-content" class="help-content">
+              Die Hilfetexte werden geladen.
+            </div>
+          </section>
         </section>
       </main>
-
-      <section class="help-frame card">
-        <div class="help-header">
-          <div>
-            <p id="help-context" class="breadcrumbs"></p>
-            <h2 id="help-title">Kontexthilfe</h2>
-          </div>
-        </div>
-        <div id="help-content" class="help-content">
-          Die Hilfetexte werden geladen.
-        </div>
-      </section>
     </div>
 
     <template id="nav-item-template">

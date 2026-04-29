@@ -230,6 +230,8 @@ function parseParameterTypes(staticNode, context) {
       enumerations,
       id: attr(parameterTypeNode, "Id"),
       name: attr(parameterTypeNode, "Name"),
+      pictureAlignment: definitionNode ? attr(definitionNode, "HorizontalAlignment") : "",
+      pictureRefId: definitionNode ? attr(definitionNode, "RefId") : "",
       sizeInBit: definitionNode ? attr(definitionNode, "SizeInBit") : "",
       type: definitionNode ? localName(definitionNode) : "",
       uiHint: definitionNode ? attr(definitionNode, "UIHint") : "",
