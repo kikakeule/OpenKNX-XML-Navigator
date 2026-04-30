@@ -13,7 +13,7 @@
   --accent-line: #9ebceb;
   --tree-hover: #f0f4fb;
   --help-bg: #fbfbfb;
-  --field-label-width: 14.5rem;
+  --field-label-width: 15rem;
   --field-control-width: 18.25rem;
   --numeric-control-width: 8.5rem;
   --shadow: none;
@@ -749,9 +749,9 @@ button.ghost {
 
 .field-card {
   display: grid;
-  gap: 4px;
-  padding: 4px 0;
-  border-bottom: 1px solid #ededed;
+  gap: 0;
+  padding: 0;
+  border-bottom: none;
 }
 
 .field-card.is-compact {
@@ -778,7 +778,7 @@ button.ghost {
 .field-row {
   display: grid;
   grid-template-columns: minmax(180px, 1fr) minmax(220px, 430px);
-  gap: 14px;
+  gap: 4px;
   align-items: center;
 }
 
@@ -989,6 +989,81 @@ button.ghost {
   color: var(--ink);
 }
 
+/* Icon select widget */
+.icon-select {
+  position: relative;
+  display: inline-block;
+  min-width: 180px;
+  max-width: 100%;
+  font-size: 0.85rem;
+  user-select: none;
+}
+
+.icon-select--disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.icon-select-display {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 6px;
+  border: 1px solid #aaa;
+  border-radius: 3px;
+  background: #fff;
+  cursor: pointer;
+  min-height: 28px;
+}
+
+.icon-select-display:hover {
+  border-color: #555;
+}
+
+.icon-select-arrow {
+  margin-left: auto;
+  color: #666;
+  font-size: 0.7rem;
+}
+
+.icon-select-dropdown {
+  position: absolute;
+  z-index: 200;
+  top: 100%;
+  left: 0;
+  min-width: 100%;
+  max-height: 280px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #aaa;
+  border-radius: 3px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.icon-select-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.icon-select-option:hover {
+  background: #f0f4ff;
+}
+
+.icon-select-option.is-selected {
+  background: #e0eaff;
+  font-weight: 600;
+}
+
+.icon-select-img {
+  width: 24px;
+  height: 24px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
 .picture-field {
   display: flex;
   width: 100%;
@@ -1010,7 +1085,9 @@ button.ghost {
 .picture-field-image {
   display: block;
   max-width: 100%;
+  max-height: 320px;
   height: auto;
+  object-fit: contain;
 }
 
 .object-card {
@@ -1350,4 +1427,12 @@ button.ghost {
 .shell.is-stacked-layout .sidebar.is-collapsed .sidebar-header,
 .shell.is-stacked-layout .help-frame.is-collapsed .help-header {
   border-bottom: 0;
+}
+
+.icon-select--images-only {
+  min-width: 72px;
+}
+
+.icon-select--images-only .icon-select-option {
+  justify-content: center;
 }

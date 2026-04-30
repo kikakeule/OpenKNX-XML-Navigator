@@ -968,8 +968,15 @@ function extractPictureIconName(refId) {
     return "";
   }
 
-  const tail = ref.split("-").pop() || "";
-  return tail.replace(/\.2E(?:png|svg|webp)$/i, "").toLowerCase();
+  const withoutPath = ref.split(/[\\/]/).pop() || ref;
+  const withoutPrefix = withoutPath.includes("--") ? withoutPath.split("--").pop() : withoutPath;
+
+  // KNX RefIds often encode characters as ".XX" (hex), e.g. ".5F" -> "_", ".20" -> " ".
+  const decoded = withoutPrefix.replace(/\.([0-9a-f]{2})/gi, (_match, hex) =>
+    String.fromCharCode(Number.parseInt(hex, 16))
+  );
+
+  return decoded.replace(/\.(?:png|svg|webp)$/i, "").toLowerCase();
 }
 
 function entryContainsSelection(entry, selectedNodeId) {
@@ -1355,10 +1362,15 @@ function renderField(node, options = {}) {
   inputBox.className = "field-input";
   const control = buildInputControl(node, description);
   inputBox.append(control);
-  if (description.suffixText) {
+  const effectiveSuffixText = description.type?.type === "TypeTime"
+    ? "hh:mm"
+    : (isClockTimeField(description)
+      ? "hh:mm"
+      : (description.suffixText || ""));
+  if (effectiveSuffixText) {
     const suffix = document.createElement("span");
     suffix.className = "field-hint";
-    suffix.textContent = description.suffixText;
+    suffix.textContent = effectiveSuffixText;
     inputBox.append(suffix);
   }
   row.append(inputBox);
@@ -1416,6 +1428,13 @@ function buildInputControl(node, description) {
   }
 
   if (isEnum) {
+    const hasEnumIcons = typeInfo.enumerations.some((e) => e.icon);
+    if (hasEnumIcons) {
+      return buildIconSelect(typeInfo.enumerations, description.value, disabled, (val) =>
+        updateParameter(node.paramRefId, val)
+      );
+    }
+
     const select = document.createElement("select");
     select.disabled = disabled;
     for (const enumeration of typeInfo.enumerations) {
@@ -1435,23 +1454,47 @@ function buildInputControl(node, description) {
     return buildPictureControl(typeInfo, description);
   }
 
+  if (typeInfo.type === "TypeTime") {
+    const input = document.createElement("input");
+    input.type = "time";
+    input.value = formatSecondsAsClockTime(description.value);
+    input.disabled = disabled;
+    input.step = "60";
+    input.addEventListener("change", () => {
+      const normalizedValue = parseClockTimeToSeconds(input.value);
+      input.value = formatSecondsAsClockTime(normalizedValue);
+      updateParameter(node.paramRefId, normalizedValue);
+    });
+    return input;
+  }
+
   if (isNumber) {
     const input = document.createElement("input");
-    input.type = "number";
-    input.value = formatControlValue(description.value, typeInfo);
+    const isClockTime = isClockTimeField(description);
+    input.type = isClockTime ? "time" : "number";
+    input.value = isClockTime
+      ? formatSecondsAsClockTime(description.value)
+      : formatControlValue(description.value, typeInfo);
     input.disabled = disabled;
-    if (typeInfo.minInclusive) {
+    if (isClockTime) {
+      input.step = "60";
+    }
+    if (!isClockTime && typeInfo.minInclusive) {
       input.min = typeInfo.minInclusive;
     }
-    if (typeInfo.maxInclusive) {
+    if (!isClockTime && typeInfo.maxInclusive) {
       input.max = typeInfo.maxInclusive;
     }
-    if (typeInfo.increment) {
+    if (!isClockTime && typeInfo.increment) {
       input.step = typeInfo.increment;
     }
     input.addEventListener("change", () => {
-      const normalizedValue = normalizeControlValue(input.value, typeInfo);
-      input.value = formatControlValue(normalizedValue, typeInfo);
+      const normalizedValue = isClockTime
+        ? parseClockTimeToSeconds(input.value)
+        : normalizeControlValue(input.value, typeInfo);
+      input.value = isClockTime
+        ? formatSecondsAsClockTime(normalizedValue)
+        : formatControlValue(normalizedValue, typeInfo);
       updateParameter(node.paramRefId, normalizedValue);
     });
     return input;
@@ -1479,13 +1522,108 @@ function buildInputControl(node, description) {
   return input;
 }
 
+function iconNameToLabel(iconName) {
+  // "01-Generallight" → "General light", "50-Temperature1" → "Temperature 1"
+  const withoutPrefix = String(iconName || "").replace(/^\d+-/, "");
+  return withoutPrefix.replace(/([a-z])([A-Z])/g, "$1 $2").trim() || iconName;
+}
+
+function buildIconSelect(enumerations, currentValue, disabled, onChange) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "icon-select" + (disabled ? " icon-select--disabled" : "");
+  if (disabled) {
+    wrapper.setAttribute("aria-disabled", "true");
+  }
+  const showText = enumerations.some((en) => String(en?.text || "").trim());
+  if (!showText) {
+    wrapper.classList.add("icon-select--images-only");
+  }
+
+  let selectedValue = currentValue;
+
+  function getLabel(en) {
+    return en.text || iconNameToLabel(en.icon) || en.value;
+  }
+
+  function buildDisplay() {
+    const selected = enumerations.find((e) => valuesMatch(e.value, selectedValue)) || enumerations[0];
+    display.innerHTML = "";
+    if (selected?.icon) {
+      const img = document.createElement("img");
+      img.className = "icon-select-img";
+      img.src = buildIconUrl(selected.icon);
+      img.alt = "";
+      img.addEventListener("error", () => img.remove());
+      display.append(img);
+    }
+    if (showText) {
+      const lbl = document.createElement("span");
+      lbl.className = "icon-select-label";
+      lbl.textContent = selected ? getLabel(selected) : "";
+      display.append(lbl);
+    }
+    const arrow = document.createElement("span");
+    arrow.className = "icon-select-arrow";
+    arrow.textContent = "▾";
+    display.append(arrow);
+  }
+
+  const display = document.createElement("div");
+  display.className = "icon-select-display";
+  buildDisplay();
+
+  const dropdown = document.createElement("div");
+  dropdown.className = "icon-select-dropdown hidden";
+
+  for (const en of enumerations) {
+    const opt = document.createElement("div");
+    opt.className = "icon-select-option" + (valuesMatch(en.value, selectedValue) ? " is-selected" : "");
+    opt.dataset.value = en.value;
+    if (en.icon) {
+      const img = document.createElement("img");
+      img.className = "icon-select-img";
+      img.src = buildIconUrl(en.icon);
+      img.alt = "";
+      img.addEventListener("error", () => img.remove());
+      opt.append(img);
+    }
+    if (showText) {
+      const lbl = document.createElement("span");
+      lbl.textContent = getLabel(en);
+      opt.append(lbl);
+    }
+    opt.addEventListener("click", () => {
+      if (disabled) return;
+      selectedValue = en.value;
+      dropdown.querySelectorAll(".icon-select-option").forEach((o) => o.classList.toggle("is-selected", o.dataset.value === en.value));
+      buildDisplay();
+      dropdown.classList.add("hidden");
+      onChange(en.value);
+    });
+    dropdown.append(opt);
+  }
+
+  if (!disabled) {
+    display.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const isOpen = !dropdown.classList.contains("hidden");
+      document.querySelectorAll(".icon-select-dropdown:not(.hidden)").forEach((d) => d.classList.add("hidden"));
+      dropdown.classList.toggle("hidden", isOpen);
+    });
+    document.addEventListener("click", () => dropdown.classList.add("hidden"), { capture: false });
+  }
+
+  wrapper.append(display, dropdown);
+  return wrapper;
+}
+
 function shouldRenderBinaryChoiceAsRadio(description, typeInfo) {
   if (!typeInfo || !Array.isArray(typeInfo.enumerations) || typeInfo.enumerations.length !== 2) {
     return false;
   }
-
-  const label = `${description?.text || ""} ${description?.name || ""}`.trim();
-  return /Empfangen über|CombinedTimeDate/i.test(label);
+  // Don't use radio if options have icons (icon-based selection)
+  const hasIcons = typeInfo.enumerations.some((e) => e.icon);
+  return !hasIcons;
 }
 
 function buildPictureControl(typeInfo, description) {
@@ -1846,7 +1984,19 @@ function syncSelectedNode() {
 }
 
 function buildNavigationEntries(nodes) {
-  return nodes.map((node) => buildNavigationEntry(node)).filter(Boolean);
+  const result = [];
+  for (const node of nodes) {
+    if (node.kind === "channelIndependentBlock") {
+      // Flatten: surface the children directly at this level, no "Global" wrapper
+      result.push(...buildNavigationEntries(node.visibleChildren || []));
+    } else {
+      const entry = buildNavigationEntry(node);
+      if (entry) {
+        result.push(entry);
+      }
+    }
+  }
+  return result;
 }
 
 function buildNavigationEntry(node) {
@@ -2098,6 +2248,11 @@ function shouldRenderChild(node, parentNode) {
     return false;
   }
 
+  // Non-inline parameterBlocks are separate nav pages; render only their nav entry, not their content inline
+  if (node.kind === "parameterBlock" && !node.inline) {
+    return false;
+  }
+
   if (node.kind === "parameterRef") {
     return !shouldHideField(node, describeField(node, state.derivedState));
   }
@@ -2234,6 +2389,59 @@ function normalizeControlValue(value, typeInfo) {
   }
 
   return String(value ?? "");
+}
+
+function isClockTimeField(description) {
+  const typeInfo = description?.type || {};
+  if (typeInfo.type !== "TypeNumber") {
+    return false;
+  }
+
+  const signature = `${typeInfo.id || ""} ${typeInfo.name || ""} ${typeInfo.uiHint || ""} ${description?.name || ""} ${description?.text || ""}`;
+
+  // Strong signal used by many KNX apps: parameter type id/name encodes "Time".
+  if (/PT-.*Time|(^|\W)time(\W|$)/i.test(`${typeInfo.id || ""} ${typeInfo.name || ""}`)) {
+    return true;
+  }
+
+  // Fallback for translated labels around day/night switching schedules.
+  if (/switch\s+to\s+(night|day)|night\s*mode|normal\s*mode|wechsel\s+nacht|normalmodus|nachtmodus|uhr/i.test(signature)) {
+    return true;
+  }
+
+  return false;
+}
+
+function formatSecondsAsClockTime(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return "";
+  }
+
+  const clamped = Math.max(0, Math.min(86399, Math.floor(numericValue)));
+  const hours = Math.floor(clamped / 3600)
+    .toString()
+    .padStart(2, "0");
+  const minutes = Math.floor((clamped % 3600) / 60)
+    .toString()
+    .padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
+function parseClockTimeToSeconds(value) {
+  const text = String(value ?? "").trim();
+  const match = text.match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return "0";
+  }
+
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+    return "0";
+  }
+
+  return String(hours * 3600 + minutes * 60);
 }
 
 function normalizeNumberValue(value) {

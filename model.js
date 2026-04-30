@@ -34,6 +34,8 @@ export function buildSimulatorModel(xmlText, options = {}) {
   const context = {
     comObjectRefs: new Map(),
     comObjects: new Map(),
+    moduleDefinitions: new Map(),
+    moduleInstances: new Set(),
     nodeIndex: new Map(),
     parameterRefs: new Map(),
     parameters: new Map(),
@@ -51,7 +53,9 @@ export function buildSimulatorModel(xmlText, options = {}) {
   parseParameterRefs(staticNode, context);
   parseComObjects(staticNode, context);
   parseComObjectRefs(staticNode, context);
+  parseModuleDefinitions(appNode, context);
 
+  const roots = parseDynamicChildren(dynamicNode, context);
   const initialState = Object.create(null);
   for (const parameterRef of context.parameterRefs.values()) {
     const parameter = context.parameters.get(parameterRef.refId);
@@ -60,7 +64,6 @@ export function buildSimulatorModel(xmlText, options = {}) {
     }
   }
 
-  const roots = parseDynamicChildren(dynamicNode, context);
   const navigation = buildNavigationEntries(roots);
 
   const warnings = [];
@@ -131,16 +134,13 @@ export function materializeNodes(nodes, runtimeState) {
 
   for (const node of nodes) {
     if (node.kind === "choose") {
-      const currentValue = runtimeState[node.paramRefId] ?? "";
-      for (const branch of node.branches) {
-        if (matchesWhenTest(branch.test, currentValue)) {
-          materialized.push(...materializeNodes(branch.children, runtimeState));
-        }
+      for (const branch of resolveActiveChooseBranches(node, runtimeState)) {
+        materialized.push(...materializeNodes(branch.children, runtimeState));
       }
       continue;
     }
 
-    if (node.kind === "assign") {
+    if (node.kind === "assign" || node.kind === "rename") {
       continue;
     }
 
@@ -153,6 +153,11 @@ export function materializeNodes(nodes, runtimeState) {
 export function resolveTitle(node, runtimeState) {
   if (!node) {
     return "";
+  }
+
+  const renamedTitle = runtimeState[`__rename__${node.id}`];
+  if (renamedTitle) {
+    return resolveTemplateText(renamedTitle, node.textParameterRefId, runtimeState);
   }
 
   let title = "";
@@ -369,10 +374,19 @@ function parseComObjectRefs(staticNode, context) {
 }
 
 function parseDynamicChildren(parentNode, context) {
+  return parseDynamicChildrenScoped(parentNode, context, null);
+}
+
+function parseDynamicChildrenScoped(parentNode, context, scope) {
   const children = [];
 
   for (const childNode of elementChildren(parentNode)) {
-    const parsedNode = parseDynamicNode(childNode, context);
+    const parsedNode = parseDynamicNode(childNode, context, scope);
+    if (Array.isArray(parsedNode)) {
+      children.push(...parsedNode);
+      continue;
+    }
+
     if (parsedNode) {
       children.push(parsedNode);
     }
@@ -381,21 +395,21 @@ function parseDynamicChildren(parentNode, context) {
   return children;
 }
 
-function parseDynamicNode(node, context) {
+function parseDynamicNode(node, context, scope) {
   switch (localName(node)) {
     case "Channel": {
       context.stats.channels += 1;
       return registerNode(
         {
-          children: parseDynamicChildren(node, context),
+          children: parseDynamicChildrenScoped(node, context, scope),
           helpContext: attr(node, "HelpContext"),
           icon: attr(node, "Icon"),
-          id: attr(node, "Id"),
+          id: scopedId(attr(node, "Id"), scope),
           kind: "channel",
           name: attr(node, "Name"),
           number: attr(node, "Number"),
-          text: attr(node, "Text", attr(node, "Name")),
-          textParameterRefId: attr(node, "TextParameterRefId"),
+          text: substituteModuleText(attr(node, "Text", attr(node, "Name")), scope),
+          textParameterRefId: scopedId(attr(node, "TextParameterRefId"), scope),
         },
         context
       );
@@ -403,29 +417,29 @@ function parseDynamicNode(node, context) {
     case "ChannelIndependentBlock": {
       return registerNode(
         {
-          children: parseDynamicChildren(node, context),
+          children: parseDynamicChildrenScoped(node, context, scope),
           helpContext: attr(node, "HelpContext"),
-          id: attr(node, "Id") || `ChannelIndependentBlock-${Math.random().toString(36).slice(2)}`,
+          id: scopedId(attr(node, "Id"), scope) || `ChannelIndependentBlock-${Math.random().toString(36).slice(2)}`,
           kind: "channelIndependentBlock",
           name: attr(node, "Name", "Global"),
-          text: attr(node, "Text", attr(node, "Name", "Global")),
+          text: substituteModuleText(attr(node, "Text", attr(node, "Name", "Global")), scope),
         },
         context
       );
     }
     case "ParameterBlock": {
       context.stats.parameterBlocks += 1;
-      const parameterRefId = attr(node, "ParamRefId");
+      const parameterRefId = scopedId(attr(node, "ParamRefId"), scope);
       const parameterRef = context.parameterRefs.get(parameterRefId);
       const parameter = parameterRef ? context.parameters.get(parameterRef.refId) : null;
 
       return registerNode(
         {
-          children: parseDynamicChildren(node, context),
+          children: parseDynamicChildrenScoped(node, context, scope),
           columns: parseGridAxis(childByName(node, "Columns"), "Column"),
           helpContext: attr(node, "HelpContext"),
           icon: attr(node, "Icon"),
-          id: attr(node, "Id"),
+          id: scopedId(attr(node, "Id"), scope),
           inline: attr(node, "Inline") === "true",
           kind: "parameterBlock",
           layout: attr(node, "Layout"),
@@ -433,11 +447,11 @@ function parseDynamicNode(node, context) {
           parameter,
           parameterRef,
           paramRefId: parameterRefId,
-          rawText: attr(node, "Text"),
+          rawText: substituteModuleText(attr(node, "Text"), scope),
           rows: parseGridAxis(childByName(node, "Rows"), "Row"),
           showInComObjectTree: attr(node, "ShowInComObjectTree"),
-          text: attr(node, "Text", attr(node, "Name")),
-          textParameterRefId: attr(node, "TextParameterRefId"),
+          text: substituteModuleText(attr(node, "Text", attr(node, "Name")), scope),
+          textParameterRefId: scopedId(attr(node, "TextParameterRefId"), scope),
         },
         context
       );
@@ -453,7 +467,7 @@ function parseDynamicNode(node, context) {
       };
     }
     case "ParameterRefRef": {
-      const parameterRefId = attr(node, "RefId");
+      const parameterRefId = scopedId(attr(node, "RefId"), scope);
       const parameterRef = context.parameterRefs.get(parameterRefId);
       const parameter = parameterRef ? context.parameters.get(parameterRef.refId) : null;
       const parameterType = parameter ? context.parameterTypes.get(parameter.parameterTypeId) : null;
@@ -471,7 +485,7 @@ function parseDynamicNode(node, context) {
       };
     }
     case "ComObjectRefRef": {
-      const comObjectRefId = attr(node, "RefId");
+      const comObjectRefId = scopedId(attr(node, "RefId"), scope);
       const comObjectRef = context.comObjectRefs.get(comObjectRefId);
       const comObject = comObjectRef ? context.comObjects.get(comObjectRef.refId) : null;
 
@@ -487,19 +501,31 @@ function parseDynamicNode(node, context) {
     case "choose": {
       return {
         branches: childElements(node, "when").map((branchNode) => ({
-          children: parseDynamicChildren(branchNode, context),
+          children: parseDynamicChildrenScoped(branchNode, context, scope),
+          isDefault: attr(branchNode, "default") === "true",
           test: attr(branchNode, "test"),
         })),
         kind: "choose",
-        paramRefId: attr(node, "ParamRefId"),
+        paramRefId: scopedId(attr(node, "ParamRefId"), scope),
       };
     }
     case "Assign": {
       return {
         kind: "assign",
-        targetParamRefRef: attr(node, "TargetParamRefRef"),
+        targetParamRefRef: scopedId(attr(node, "TargetParamRefRef"), scope),
         value: attr(node, "Value"),
       };
+    }
+    case "Rename": {
+      return {
+        id: scopedId(attr(node, "Id"), scope),
+        kind: "rename",
+        targetId: scopedId(attr(node, "RefId"), scope),
+        text: substituteModuleText(attr(node, "Text"), scope),
+      };
+    }
+    case "Module": {
+      return expandModule(node, context);
     }
     case "Button": {
       return {
@@ -583,11 +609,8 @@ function applyAssignments(nodes, runtimeState) {
 
   for (const node of nodes) {
     if (node.kind === "choose") {
-      const currentValue = runtimeState[node.paramRefId] ?? "";
-      for (const branch of node.branches) {
-        if (matchesWhenTest(branch.test, currentValue)) {
-          changed = applyAssignments(branch.children, runtimeState) || changed;
-        }
+      for (const branch of resolveActiveChooseBranches(node, runtimeState)) {
+        changed = applyAssignments(branch.children, runtimeState) || changed;
       }
       continue;
     }
@@ -601,12 +624,32 @@ function applyAssignments(nodes, runtimeState) {
       continue;
     }
 
+    if (node.kind === "rename") {
+      const renameKey = `__rename__${node.targetId}`;
+      const renamedText = String(node.text || "");
+      if (runtimeState[renameKey] !== renamedText) {
+        runtimeState[renameKey] = renamedText;
+        changed = true;
+      }
+      continue;
+    }
+
     if (node.children && node.children.length > 0) {
       changed = applyAssignments(node.children, runtimeState) || changed;
     }
   }
 
   return changed;
+}
+
+function resolveActiveChooseBranches(node, runtimeState) {
+  const currentValue = runtimeState[node.paramRefId] ?? "";
+  const matchingBranches = node.branches.filter((branch) => matchesWhenTest(branch.test, currentValue));
+  if (matchingBranches.length > 0) {
+    return matchingBranches;
+  }
+
+  return node.branches.filter((branch) => branch.isDefault);
 }
 
 function matchesWhenTest(testExpression, currentValue) {
@@ -669,7 +712,8 @@ function resolveTemplateText(text, textParameterRefId, runtimeState) {
   }
 
   const textValue = textParameterRefId ? String(runtimeState[textParameterRefId] ?? "") : "";
-  return sourceText.replace(/\{\{\d+:([^}]*)\}\}/g, (_match, fallback) => textValue || fallback || "");
+  const withFallbackResolved = sourceText.replace(/\{\{\d+:([^}]*)\}\}/g, (_match, fallback) => textValue || fallback || "");
+  return withFallbackResolved.replace(/\{\{\d+\}\}/g, () => textValue);
 }
 
 function registerNode(node, context) {
@@ -677,6 +721,258 @@ function registerNode(node, context) {
     context.nodeIndex.set(node.id, node);
   }
   return node;
+}
+
+function parseModuleDefinitions(appNode, context) {
+  const moduleDefsNode = childByName(appNode, "ModuleDefs");
+  if (!moduleDefsNode) {
+    return;
+  }
+
+  for (const moduleDefNode of childElements(moduleDefsNode, "ModuleDef")) {
+    const moduleDefId = attr(moduleDefNode, "Id");
+    if (!moduleDefId) {
+      continue;
+    }
+
+    const argumentsById = new Map();
+    const argumentsNode = childByName(moduleDefNode, "Arguments");
+    for (const argumentNode of childElements(argumentsNode, "Argument")) {
+      const argumentId = attr(argumentNode, "Id");
+      if (!argumentId) {
+        continue;
+      }
+
+      argumentsById.set(argumentId, {
+        id: argumentId,
+        name: attr(argumentNode, "Name"),
+      });
+    }
+
+    const templateIds = captureModuleTemplateIds(moduleDefId, context);
+    const moduleStaticNode = childByName(moduleDefNode, "Static");
+    if (moduleStaticNode) {
+      const currentParameterCount = context.stats.parameters;
+      parseParameterTypes(moduleStaticNode, context);
+      parseParameters(moduleStaticNode, context);
+      parseParameterRefs(moduleStaticNode, context);
+      parseComObjects(moduleStaticNode, context);
+      parseComObjectRefs(moduleStaticNode, context);
+      context.stats.parameters = currentParameterCount;
+    }
+
+    const capturedTemplateIds = captureModuleTemplateIds(moduleDefId, context);
+    context.moduleDefinitions.set(moduleDefId, {
+      argumentsById,
+      dynamicNode: childByName(moduleDefNode, "Dynamic"),
+      id: moduleDefId,
+      templateIds: {
+        comObjectRefs: [...capturedTemplateIds.comObjectRefs.keys()],
+        comObjects: [...capturedTemplateIds.comObjects.keys()],
+        parameterRefs: [...capturedTemplateIds.parameterRefs.keys()],
+        parameters: [...capturedTemplateIds.parameters.keys()],
+        parameterTypes: [...capturedTemplateIds.parameterTypes.keys()],
+      },
+    });
+
+    // Keep only the ids that belong to this module template.
+    context.moduleDefinitions.get(moduleDefId).templateIds = {
+      comObjectRefs: context.moduleDefinitions.get(moduleDefId).templateIds.comObjectRefs.filter((id) => !templateIds.comObjectRefs.has(id)),
+      comObjects: context.moduleDefinitions.get(moduleDefId).templateIds.comObjects.filter((id) => !templateIds.comObjects.has(id)),
+      parameterRefs: context.moduleDefinitions.get(moduleDefId).templateIds.parameterRefs.filter((id) => !templateIds.parameterRefs.has(id)),
+      parameters: context.moduleDefinitions.get(moduleDefId).templateIds.parameters.filter((id) => !templateIds.parameters.has(id)),
+      parameterTypes: context.moduleDefinitions.get(moduleDefId).templateIds.parameterTypes.filter((id) => !templateIds.parameterTypes.has(id)),
+    };
+  }
+}
+
+function captureModuleTemplateIds(moduleDefId, context) {
+  return {
+    comObjectRefs: new Set([...context.comObjectRefs.keys()].filter((id) => isModuleTemplateId(id, moduleDefId))),
+    comObjects: new Set([...context.comObjects.keys()].filter((id) => isModuleTemplateId(id, moduleDefId))),
+    parameterRefs: new Set([...context.parameterRefs.keys()].filter((id) => isModuleTemplateId(id, moduleDefId))),
+    parameters: new Set([...context.parameters.keys()].filter((id) => isModuleTemplateId(id, moduleDefId))),
+    parameterTypes: new Set([...context.parameterTypes.keys()].filter((id) => isModuleTemplateId(id, moduleDefId))),
+  };
+}
+
+function isModuleTemplateId(id, moduleDefId) {
+  const value = String(id || "");
+  const moduleToken = `${moduleDefId}_`;
+  return value.includes(moduleToken);
+}
+
+function expandModule(moduleNode, context) {
+  const moduleDefId = attr(moduleNode, "RefId");
+  const moduleDef = context.moduleDefinitions.get(moduleDefId);
+  if (!moduleDef || !moduleDef.dynamicNode) {
+    context.unsupportedDynamicElements.add("Module");
+    return [];
+  }
+
+  const moduleId = attr(moduleNode, "Id");
+  if (!moduleId) {
+    context.unsupportedDynamicElements.add("Module");
+    return [];
+  }
+
+  const moduleArguments = resolveModuleArguments(moduleNode, moduleDef);
+  ensureModuleInstanceDefinitions(moduleDef, moduleId, moduleArguments, context);
+
+  const scope = {
+    moduleArguments,
+    moduleDefId,
+    moduleId,
+  };
+  return parseDynamicChildrenScoped(moduleDef.dynamicNode, context, scope);
+}
+
+function resolveModuleArguments(moduleNode, moduleDef) {
+  const valuesByRefId = new Map();
+  for (const argumentNode of elementChildren(moduleNode)) {
+    const argumentTag = localName(argumentNode);
+    if (argumentTag !== "NumericArg" && argumentTag !== "TextArg") {
+      continue;
+    }
+
+    const argumentRefId = attr(argumentNode, "RefId");
+    if (!argumentRefId) {
+      continue;
+    }
+
+    valuesByRefId.set(argumentRefId, attr(argumentNode, "Value"));
+  }
+
+  const valuesByName = Object.create(null);
+  for (const [argumentRefId, value] of valuesByRefId.entries()) {
+    const argument = moduleDef.argumentsById.get(argumentRefId);
+    if (argument?.name) {
+      valuesByName[argument.name] = value;
+    }
+  }
+
+  return {
+    byName: valuesByName,
+    byRefId: valuesByRefId,
+  };
+}
+
+function ensureModuleInstanceDefinitions(moduleDef, moduleId, moduleArguments, context) {
+  if (context.moduleInstances.has(moduleId)) {
+    return;
+  }
+
+  for (const parameterTypeId of moduleDef.templateIds.parameterTypes) {
+    const templateType = context.parameterTypes.get(parameterTypeId);
+    if (!templateType) {
+      continue;
+    }
+
+    const instanceTypeId = scopedId(parameterTypeId, { moduleDefId: moduleDef.id, moduleId });
+    if (!context.parameterTypes.has(instanceTypeId)) {
+      context.parameterTypes.set(instanceTypeId, {
+        ...templateType,
+        id: instanceTypeId,
+      });
+    }
+  }
+
+  for (const parameterId of moduleDef.templateIds.parameters) {
+    const templateParameter = context.parameters.get(parameterId);
+    if (!templateParameter) {
+      continue;
+    }
+
+    const instanceParameterId = scopedId(parameterId, { moduleDefId: moduleDef.id, moduleId });
+    if (!context.parameters.has(instanceParameterId)) {
+      context.parameters.set(instanceParameterId, {
+        ...templateParameter,
+        id: instanceParameterId,
+        parameterTypeId: scopedId(templateParameter.parameterTypeId, { moduleDefId: moduleDef.id, moduleId }),
+      });
+    }
+  }
+
+  for (const parameterRefId of moduleDef.templateIds.parameterRefs) {
+    const templateParameterRef = context.parameterRefs.get(parameterRefId);
+    if (!templateParameterRef) {
+      continue;
+    }
+
+    const instanceParameterRefId = scopedId(parameterRefId, { moduleDefId: moduleDef.id, moduleId });
+    if (!context.parameterRefs.has(instanceParameterRefId)) {
+      context.parameterRefs.set(instanceParameterRefId, {
+        ...templateParameterRef,
+        id: instanceParameterRefId,
+        refId: scopedId(templateParameterRef.refId, { moduleDefId: moduleDef.id, moduleId }),
+      });
+    }
+  }
+
+  const objectNumberBase = Number(moduleArguments.byName.ObjNumberBase);
+  for (const comObjectId of moduleDef.templateIds.comObjects) {
+    const templateComObject = context.comObjects.get(comObjectId);
+    if (!templateComObject) {
+      continue;
+    }
+
+    const instanceComObjectId = scopedId(comObjectId, { moduleDefId: moduleDef.id, moduleId });
+    if (!context.comObjects.has(instanceComObjectId)) {
+      let number = templateComObject.number;
+      if (Number.isFinite(objectNumberBase) && isNumericString(number)) {
+        number = String(Number(number) + objectNumberBase);
+      }
+
+      context.comObjects.set(instanceComObjectId, {
+        ...templateComObject,
+        id: instanceComObjectId,
+        number,
+      });
+    }
+  }
+
+  for (const comObjectRefId of moduleDef.templateIds.comObjectRefs) {
+    const templateComObjectRef = context.comObjectRefs.get(comObjectRefId);
+    if (!templateComObjectRef) {
+      continue;
+    }
+
+    const instanceComObjectRefId = scopedId(comObjectRefId, { moduleDefId: moduleDef.id, moduleId });
+    if (!context.comObjectRefs.has(instanceComObjectRefId)) {
+      context.comObjectRefs.set(instanceComObjectRefId, {
+        ...templateComObjectRef,
+        id: instanceComObjectRefId,
+        refId: scopedId(templateComObjectRef.refId, { moduleDefId: moduleDef.id, moduleId }),
+        textParameterRefId: scopedId(templateComObjectRef.textParameterRefId, { moduleDefId: moduleDef.id, moduleId }),
+      });
+    }
+  }
+
+  context.moduleInstances.add(moduleId);
+}
+
+function scopedId(rawId, scope) {
+  const value = String(rawId || "");
+  if (!scope || !value || !scope.moduleDefId || !scope.moduleId) {
+    return value;
+  }
+
+  return value.replace(scope.moduleDefId, scope.moduleId);
+}
+
+function substituteModuleText(text, scope) {
+  const value = String(text || "");
+  if (!scope || !value.includes("{{") || !scope.moduleArguments?.byName) {
+    return value;
+  }
+
+  return value.replace(/\{\{([A-Za-z0-9_.-]+)\}\}/g, (match, token) => {
+    if (Object.prototype.hasOwnProperty.call(scope.moduleArguments.byName, token)) {
+      return String(scope.moduleArguments.byName[token] ?? "");
+    }
+
+    return match;
+  });
 }
 
 function hasDescendant(parentNode, name) {
