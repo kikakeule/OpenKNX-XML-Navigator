@@ -355,6 +355,11 @@ button.ghost {
   line-height: 1.45;
 }
 
+.about-version {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
 .about-repository-link {
   display: inline-flex;
   justify-self: start;

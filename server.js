@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const simulatorRoot = path.dirname(fileURLToPath(import.meta.url));
 const workspaceRoot = simulatorRoot;
+const packageVersion = resolvePackageVersion();
 const port = Number.parseInt(process.env.OPENKNX_XML_NAVIGATOR_PORT || process.env.XML_NAVIGATOR_PORT || "4173", 10);
 const navigatorConfig = resolveNavigatorConfig();
 const helpArchiveCache = new Map();
@@ -41,6 +42,15 @@ function readNavigatorEnv(name, fallback = "") {
   return String(process.env[name] ?? fallback).trim();
 }
 
+function resolvePackageVersion() {
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(simulatorRoot, "package.json"), "utf8"));
+    return String(manifest?.version || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 function resolveNavigatorConfig() {
   return {
     appSubtitle: readNavigatorEnv(
@@ -48,6 +58,7 @@ function resolveNavigatorConfig() {
       "Interaktive Vorschau fuer expandierte XML mit Navigation, Bedingungen und Parameteransicht."
     ),
     appTitle: readNavigatorEnv("OPENKNX_XML_NAVIGATOR_APP_TITLE", "OpenKNX-XML-Navigator"),
+    appVersion: readNavigatorEnv("OPENKNX_XML_NAVIGATOR_APP_VERSION", packageVersion),
     repositoryLabel: readNavigatorEnv("OPENKNX_XML_NAVIGATOR_REPOSITORY_LABEL", "GitHub"),
     repositoryUrl: readNavigatorEnv(
       "OPENKNX_XML_NAVIGATOR_REPOSITORY_URL",
@@ -445,6 +456,239 @@ function buildUploadedSourcePayload(uploadedSource) {
   };
 }
 
+function deriveKnxprodBaggageTargetPath(value) {
+  const normalizedValue = String(value || "").trim();
+  if (!normalizedValue) {
+    return "";
+  }
+
+  const baseName = path.posix.basename(normalizedValue, path.posix.extname(normalizedValue));
+  const match = baseName.match(/_A-([0-9A-F]+)(?:-|$)/i) || normalizedValue.match(/_A-([0-9A-F]+)(?:-|$)/i);
+  const targetToken = String(match?.[1] || "").trim().toUpperCase();
+  if (!targetToken || targetToken.length % 2 !== 0) {
+    return "";
+  }
+
+  const segments = [];
+  for (let index = 0; index < targetToken.length; index += 2) {
+    segments.push(targetToken.slice(index, index + 2));
+  }
+
+  return segments.join("/");
+}
+
+function collectKnxprodBaggageDeclarations(entries, manufacturerRoot) {
+  const baggageManifestEntry = findArchiveEntry(entries, manufacturerRoot, "Baggages.xml");
+  if (!baggageManifestEntry) {
+    return [];
+  }
+
+  const baggageManifest = parseXmlMetadata(readArchiveEntryText(baggageManifestEntry));
+  const baggageNodes = asArray(baggageManifest?.KNX?.ManufacturerData?.Manufacturer?.Baggages?.Baggage);
+  const declarations = [];
+  const seenArchivePaths = new Set();
+
+  for (const baggageNode of baggageNodes) {
+    const fileName = path.posix.basename(normalizeArchiveEntryPath(String(baggageNode?.Name || "")));
+    if (!fileName) {
+      continue;
+    }
+
+    const targetPath = normalizeArchiveEntryPath(String(baggageNode?.TargetPath || "").replace(/\\/g, "/"));
+    const archivePath = normalizeArchiveEntryPath(
+      path.posix.join(manufacturerRoot === "." ? "" : manufacturerRoot, "Baggages", targetPath, fileName)
+    );
+    const dedupeKey = archivePath.toLowerCase();
+    if (seenArchivePaths.has(dedupeKey)) {
+      continue;
+    }
+
+    seenArchivePaths.add(dedupeKey);
+    declarations.push({
+      archivePath,
+      fileName,
+      targetPath,
+    });
+  }
+
+  return declarations;
+}
+
+function selectKnxprodBaggageDeclarations(declarations, selectedProduct, entryName) {
+  if (declarations.length === 0) {
+    return [];
+  }
+
+  const preferredTargetPath = normalizeArchiveEntryPath(
+    deriveKnxprodBaggageTargetPath(selectedProduct?.applicationProgramId) || deriveKnxprodBaggageTargetPath(entryName)
+  );
+  const declarationsByTargetPath = new Map();
+  for (const declaration of declarations) {
+    const targetPath = declaration.targetPath || "";
+    if (!declarationsByTargetPath.has(targetPath)) {
+      declarationsByTargetPath.set(targetPath, []);
+    }
+
+    declarationsByTargetPath.get(targetPath).push(declaration);
+  }
+
+  const selectedDeclarations = [];
+  const appendDeclarations = (targetPath) => {
+    for (const declaration of declarationsByTargetPath.get(targetPath) || []) {
+      selectedDeclarations.push(declaration);
+    }
+  };
+
+  if (declarationsByTargetPath.has("")) {
+    appendDeclarations("");
+  }
+
+  if (preferredTargetPath && declarationsByTargetPath.has(preferredTargetPath)) {
+    appendDeclarations(preferredTargetPath);
+  }
+
+  if (selectedDeclarations.length > 0) {
+    return selectedDeclarations;
+  }
+
+  const nonEmptyTargetPaths = Array.from(declarationsByTargetPath.keys()).filter(Boolean);
+  if (nonEmptyTargetPaths.length === 1) {
+    return declarationsByTargetPath.get(nonEmptyTargetPaths[0]) || [];
+  }
+
+  return declarations;
+}
+
+function resolveKnxprodBaggageRoot(selectedProduct, entryName) {
+  const normalizedEntryName = normalizeArchiveEntryPath(entryName);
+  const manufacturerRoot = normalizeArchiveEntryPath(path.posix.dirname(normalizedEntryName));
+  const preferredTargetPath = normalizeArchiveEntryPath(
+    deriveKnxprodBaggageTargetPath(selectedProduct?.applicationProgramId) || deriveKnxprodBaggageTargetPath(normalizedEntryName)
+  );
+
+  if (preferredTargetPath) {
+    return normalizeArchiveEntryPath(
+      path.posix.join(manufacturerRoot === "." ? "" : manufacturerRoot, "Baggages", preferredTargetPath)
+    );
+  }
+
+  return normalizeArchiveEntryPath(path.posix.join(manufacturerRoot === "." ? "" : manufacturerRoot, "Baggages"));
+}
+
+function findArchiveEntryByPath(entries, entryPath) {
+  const normalizedEntryPath = normalizeArchiveEntryPath(entryPath).toLowerCase();
+  if (!normalizedEntryPath) {
+    return null;
+  }
+
+  for (const entry of entries) {
+    if (entry.isDirectory) {
+      continue;
+    }
+
+    if (normalizeArchiveEntryPath(entry.entryName).toLowerCase() === normalizedEntryPath) {
+      return entry;
+    }
+  }
+
+  return null;
+}
+
+function mergeHelpTexts(targetHelpTexts, additionalHelpTexts) {
+  for (const [helpId, helpText] of Object.entries(additionalHelpTexts || {})) {
+    if (!Object.hasOwn(targetHelpTexts, helpId)) {
+      targetHelpTexts[helpId] = helpText;
+    }
+  }
+}
+
+function extractHelpTextsFromZipBuffer(body) {
+  const helpArchive = new AdmZip(body);
+  const helpTexts = Object.create(null);
+  for (const entry of helpArchive.getEntries()) {
+    if (entry.isDirectory || !entry.entryName.endsWith(".txt")) {
+      continue;
+    }
+
+    const helpId = path.posix.basename(entry.entryName, ".txt");
+    helpTexts[helpId] = entry
+      .getData()
+      .toString("utf8")
+      .replace(/\r\n/g, "\n")
+      .trim();
+  }
+
+  return helpTexts;
+}
+
+function addIconsFromZipBuffer(icons, body) {
+  const iconArchive = new AdmZip(body);
+  for (const entry of iconArchive.getEntries()) {
+    if (entry.isDirectory) {
+      continue;
+    }
+
+    const extension = path.posix.extname(entry.entryName).toLowerCase();
+    if (![".png", ".svg", ".webp"].includes(extension)) {
+      continue;
+    }
+
+    const iconName = path.posix.basename(entry.entryName, extension).toLowerCase();
+    if (!icons.has(iconName)) {
+      icons.set(iconName, {
+        body: entry.getData(),
+        contentType: contentTypes[extension] || "application/octet-stream",
+      });
+    }
+  }
+}
+
+function extractKnxprodBaggageAssets(entries, selectedProduct, entryName) {
+  const normalizedEntryName = normalizeArchiveEntryPath(entryName);
+  const manufacturerRoot = normalizeArchiveEntryPath(path.posix.dirname(normalizedEntryName));
+  const declarations = collectKnxprodBaggageDeclarations(entries, manufacturerRoot);
+  if (declarations.length === 0) {
+    const baggageRoot = resolveKnxprodBaggageRoot(selectedProduct, normalizedEntryName);
+    return {
+      helpTexts: extractHelpTextsFromArchive(entries, baggageRoot),
+      icons: extractIconsFromArchive(entries, baggageRoot),
+    };
+  }
+
+  const selectedDeclarations = selectKnxprodBaggageDeclarations(declarations, selectedProduct, normalizedEntryName);
+  const helpTexts = Object.create(null);
+  const icons = new Map();
+
+  for (const declaration of selectedDeclarations) {
+    const baggageEntry = findArchiveEntryByPath(entries, declaration.archivePath);
+    if (!baggageEntry) {
+      continue;
+    }
+
+    const extension = path.posix.extname(declaration.fileName).toLowerCase();
+    if (extension === ".zip") {
+      const body = baggageEntry.getData();
+      mergeHelpTexts(helpTexts, extractHelpTextsFromZipBuffer(body));
+      addIconsFromZipBuffer(icons, body);
+      continue;
+    }
+
+    if (![".png", ".svg", ".webp"].includes(extension)) {
+      continue;
+    }
+
+    const iconName = path.posix.basename(declaration.fileName, extension).toLowerCase();
+    if (!icons.has(iconName)) {
+      icons.set(iconName, {
+        body: baggageEntry.getData(),
+        contentType: contentTypes[extension] || "application/octet-stream",
+      });
+    }
+  }
+
+  return { helpTexts, icons };
+}
+
 function finalizeKnxprodSelection(sessionId, productId, languageId) {
   const session = resolveKnxprodSelectionSession(sessionId);
   const selectedProduct = session.products.find((product) => product.productId === productId)
@@ -455,16 +699,18 @@ function finalizeKnxprodSelection(sessionId, productId, languageId) {
   }
 
   const archive = new AdmZip(session.body);
+  const archiveEntries = archive.getEntries();
   const xmlEntry = archive.getEntry(selectedProduct.entryName);
   if (!xmlEntry) {
     throw new Error("Die ApplicationProgram-XML fuer das ausgewaehlte Produkt wurde nicht gefunden.");
   }
 
   const selectedLanguage = String(languageId || selectedProduct.defaultLanguage || selectedProduct.languages[0] || "").trim();
+  const baggageAssets = extractKnxprodBaggageAssets(archiveEntries, selectedProduct, xmlEntry.entryName);
   const uploadedSource = {
     xmlText: readArchiveEntryText(xmlEntry),
-    helpTexts: {},
-    icons: new Map(),
+    helpTexts: baggageAssets.helpTexts,
+    icons: baggageAssets.icons,
     resolvedEntryName: normalizeArchiveEntryPath(xmlEntry.entryName),
     selectedLanguage,
     sourceId: `upload:${randomUUID()}`,
@@ -874,47 +1120,14 @@ function extractHelpTextsFromArchive(entries, baggageRoot) {
     return {};
   }
 
-  const helpArchive = new AdmZip(helpArchiveEntry.getData());
-  const helpTexts = Object.create(null);
-  for (const entry of helpArchive.getEntries()) {
-    if (entry.isDirectory || !entry.entryName.endsWith(".txt")) {
-      continue;
-    }
-
-    const helpId = path.posix.basename(entry.entryName, ".txt");
-    helpTexts[helpId] = entry
-      .getData()
-      .toString("utf8")
-      .replace(/\r\n/g, "\n")
-      .trim();
-  }
-
-  return helpTexts;
+  return extractHelpTextsFromZipBuffer(helpArchiveEntry.getData());
 }
 
 function extractIconsFromArchive(entries, baggageRoot) {
   const icons = new Map();
   const iconArchiveEntry = findArchiveEntry(entries, baggageRoot, "Icons.zip");
   if (iconArchiveEntry) {
-    const iconArchive = new AdmZip(iconArchiveEntry.getData());
-    for (const entry of iconArchive.getEntries()) {
-      if (entry.isDirectory) {
-        continue;
-      }
-
-      const extension = path.posix.extname(entry.entryName).toLowerCase();
-      if (![".png", ".svg", ".webp"].includes(extension)) {
-        continue;
-      }
-
-      const iconName = path.posix.basename(entry.entryName, extension).toLowerCase();
-      if (!icons.has(iconName)) {
-        icons.set(iconName, {
-          body: entry.getData(),
-          contentType: contentTypes[extension] || "application/octet-stream",
-        });
-      }
-    }
+    addIconsFromZipBuffer(icons, iconArchiveEntry.getData());
   }
 
   const normalizedBaggageRoot = normalizeArchiveEntryPath(baggageRoot);

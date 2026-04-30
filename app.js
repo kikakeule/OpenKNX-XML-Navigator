@@ -59,6 +59,7 @@ const elements = {
   aboutRepositoryLink: document.querySelector("#about-repository-link"),
   aboutTitle: document.querySelector("#about-title"),
   aboutTrademarkNote: document.querySelector("#about-trademark-note"),
+  aboutVersion: document.querySelector("#about-version"),
   appSubtitle: document.querySelector("#app-subtitle"),
   appTitle: document.querySelector("#app-title"),
   appStatus: document.querySelector("#app-status"),
@@ -151,6 +152,7 @@ function applyAppConfig(config) {
 
   const appTitle = String(config.appTitle || "").trim();
   const appSubtitle = String(config.appSubtitle || "").trim();
+  const appVersion = String(config.appVersion || "").trim();
   const trademarkNotice = String(config.trademarkNotice || "").trim();
   const repositoryUrl = String(config.repositoryUrl || "").trim();
   const repositoryLabel = String(config.repositoryLabel || "").trim();
@@ -164,6 +166,11 @@ function applyAppConfig(config) {
 
   if (appSubtitle) {
     elements.appSubtitle.textContent = appSubtitle;
+  }
+
+  if (elements.aboutVersion) {
+    elements.aboutVersion.textContent = appVersion ? `Version ${appVersion}` : "";
+    elements.aboutVersion.classList.toggle("hidden", !appVersion);
   }
 
   if (trademarkNotice) {
