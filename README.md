@@ -78,6 +78,13 @@ Notes:
 - KNXPROD imports still show the product/language selector when required
 - the imported source is session-local and is not added to the server-backed source list
 
+## XML handling notes
+
+- Time-of-day parameters can use `TypeTime` (not `TypeNumber`).
+- For KNX XML with `TypeTime` and `Unit="Seconds"`, values represent seconds since midnight in the range `0..86399`.
+- UI rendering should show these values as `HH:MM` (for example `64800` -> `18:00`) and convert back to seconds on save.
+- `UIHint="Time_hhmm"` is a practical hint for clock-time presentation, but the primary detection should be based on the XML type (`TypeTime`).
+
 ## Environment variables
 
 - `OPENKNX_XML_NAVIGATOR_PORT`: HTTP port. Default: `4173`
